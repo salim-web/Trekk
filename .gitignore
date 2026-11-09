@@ -1,0 +1,34 @@
+# Build and cache outputs
+.dart_tool/
+.packages
+.pub/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+
+# Android build outputs & local config
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/app/build/
+mobile/build/
+*.apk
+*.aab
+
+# Python & testing
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+env/
+venv/
+*.db
+*.sqlite3
+.env
+
+# IDE & OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db
