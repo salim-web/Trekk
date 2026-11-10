@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useMemo } from 'react';
+import React, { useRef, useEffect, useMemo, useImperativeHandle, forwardRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { TrailModel } from '../constants/SeededTrails';
@@ -7,12 +7,23 @@ import { SoiCandidateTrail } from '../services/SoiAnalysisService';
 import { SoiExtractionResult, ExtractedTrail } from '../services/soiAnalyzerService';
 import { SquadMediaRecord } from '../services/DatabaseService';
 
+export interface TopoMapViewHandle {
+  focusSoiTrail: (trailId: string, coords: [number, number][]) => void;
+  flyToRegion: (bounds: [number, number][]) => void;
+}
+
 interface TopoMapViewProps {
   trails: TrailModel[];
   selectedTrail?: TrailModel | null;
   soiCandidateTrails?: SoiCandidateTrail[];
   soiOverlayData?: SoiExtractionResult | null;
   soiOpacity?: number;
+  layerVisibility?: {
+    raw: boolean;
+    footpaths: boolean;
+    water: boolean;
+    camps: boolean;
+  };
   squadPhotos?: SquadMediaRecord[];
   onSelectTrail: (trail: TrailModel) => void;
   onSelectSoiTrail?: (trail: ExtractedTrail) => void;
@@ -20,18 +31,19 @@ interface TopoMapViewProps {
   regionFocus?: string;
 }
 
-export const TopoMapView: React.FC<TopoMapViewProps> = ({
+export const TopoMapView = forwardRef<TopoMapViewHandle, TopoMapViewProps>(({
   trails,
   selectedTrail,
   soiCandidateTrails = [],
   soiOverlayData = null,
   soiOpacity = 0.72,
+  layerVisibility = { raw: true, footpaths: true, water: true, camps: true },
   squadPhotos = [],
   onSelectTrail,
   onSelectSoiTrail,
   onDeselect,
   regionFocus,
-}) => {
+}, ref) => {
   const webViewRef = useRef<WebView>(null);
   const isMapReadyRef = useRef<boolean>(false);
 
@@ -277,6 +289,7 @@ export const TopoMapView: React.FC<TopoMapViewProps> = ({
       }).addTo(map);
 
       // Clear existing sublayers
+      window.soiTrailPolylines = {};
       window.soiFootpathsSublayer.clearLayers();
       window.soiWaterSublayer.clearLayers();
       window.soiCampsSublayer.clearLayers();
@@ -305,10 +318,26 @@ export const TopoMapView: React.FC<TopoMapViewProps> = ({
           window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'SELECT_SOI_FEATURE', id: t.id, trail: t }));
         });
 
+        window.soiTrailPolylines[t.id] = poly;
         window.soiFootpathsSublayer.addLayer(poly);
       });
 
-      // 2. Extracted Water Springs, Campsites & Spot Heights
+      // 2. Extracted Waterway Streams (Cyan Polyline)
+      (extractedFeatures.waterways || []).forEach(function(w) {
+        var latLngs = (w.coords || []).map(function(c) { return [c[0], c[1]]; });
+        var poly = L.polyline(latLngs, {
+          color: '#38BDF8',
+          weight: 2.5,
+          opacity: 0.85
+        }).bindPopup(
+          '<div style=\"padding:4px;\">' +
+          '<b style=\"color:#38BDF8;\">💧 ' + (w.name || 'Stream / Waterway') + '</b>' +
+          '</div>'
+        );
+        window.soiWaterSublayer.addLayer(poly);
+      });
+
+      // 3. Extracted Water Springs, Campsites & Spot Heights
       (extractedFeatures.pois || []).forEach(function(p) {
         var color = p.type === 'water' ? '#38BDF8' : p.type === 'camp' ? '#FACC15' : '#FF5500';
         var marker = L.circleMarker([p.lat, p.lon], {
@@ -334,7 +363,30 @@ export const TopoMapView: React.FC<TopoMapViewProps> = ({
         }
       });
 
-      map.flyToBounds(bounds, { padding: [30, 30], duration: 1.2 });
+      map.flyToBounds(bounds, { padding: [20, 20], maxZoom: 13, duration: 1.2 });
+    };
+
+    window.focusSoiTrail = function(trailId, coords) {
+      if (window.soiTrailPolylines) {
+        Object.keys(window.soiTrailPolylines).forEach(function(id) {
+          var p = window.soiTrailPolylines[id];
+          if (p) {
+            p.setStyle({ color: '#A855F7', weight: 4.5, opacity: 0.85, dashArray: '8, 6' });
+          }
+        });
+        if (window.soiTrailPolylines[trailId]) {
+          window.soiTrailPolylines[trailId].setStyle({
+            color: '#FF5500',
+            weight: 7.0,
+            opacity: 1.0,
+            dashArray: null
+          });
+          window.soiTrailPolylines[trailId].bringToFront();
+        }
+      }
+      if (coords && coords.length > 0) {
+        map.flyToBounds(coords, { padding: [50, 50], maxZoom: 14, duration: 1.0 });
+      }
     };
 
     window.setSoiOverlayOpacity = function(val) {
@@ -376,6 +428,7 @@ export const TopoMapView: React.FC<TopoMapViewProps> = ({
         map.removeLayer(window.soiImageLayer);
         window.soiImageLayer = null;
       }
+      window.soiTrailPolylines = {};
       window.soiFootpathsSublayer.clearLayers();
       window.soiWaterSublayer.clearLayers();
       window.soiCampsSublayer.clearLayers();
@@ -452,9 +505,19 @@ export const TopoMapView: React.FC<TopoMapViewProps> = ({
     const featuresJson = JSON.stringify({
       trails: data.trails,
       pois: data.pois,
+      waterways: data.waterways || [],
     });
     runScript(`window.overlaySoiSheet('${data.imageDataUri}', ${boundsJson}, ${featuresJson}, ${opacity})`);
   };
+
+  useImperativeHandle(ref, () => ({
+    focusSoiTrail: (trailId: string, coords: [number, number][]) => {
+      runScript(`window.focusSoiTrail('${trailId}', ${JSON.stringify(coords)})`);
+    },
+    flyToRegion: (bounds: [number, number][]) => {
+      runScript(`window.flyToRegion(${JSON.stringify(bounds)})`);
+    },
+  }));
 
   const syncSquadPhotos = (photos: SquadMediaRecord[]) => {
     const payload = JSON.stringify(photos);
@@ -483,6 +546,15 @@ export const TopoMapView: React.FC<TopoMapViewProps> = ({
     if (!isMapReadyRef.current) return;
     runScript(`window.setSoiOverlayOpacity(${soiOpacity})`);
   }, [soiOpacity]);
+
+  // Handle Layer Visibility Toggles
+  useEffect(() => {
+    if (!isMapReadyRef.current || !layerVisibility) return;
+    runScript(`window.toggleSoiLayer('raw', ${layerVisibility.raw})`);
+    runScript(`window.toggleSoiLayer('footpaths', ${layerVisibility.footpaths})`);
+    runScript(`window.toggleSoiLayer('water', ${layerVisibility.water})`);
+    runScript(`window.toggleSoiLayer('camps', ${layerVisibility.camps})`);
+  }, [layerVisibility]);
 
   // Handle Squad Photos
   useEffect(() => {
@@ -595,7 +667,7 @@ export const TopoMapView: React.FC<TopoMapViewProps> = ({
       />
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {

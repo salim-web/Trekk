@@ -423,7 +423,7 @@ export default function SquadsScreen() {
             onPress={() => setActiveTab('CHAT')}
           >
             <MessageSquare size={13} color={activeTab === 'CHAT' ? FieldColors.rescueOrange : '#888'} />
-            <Text style={[styles.subTabText, activeTab === 'CHAT' && styles.subTabTextActive]}>
+            <Text style={[styles.subTabText, activeTab === 'CHAT' && styles.subTabTextActive]} numberOfLines={1}>
               MESH CHAT ({messages.length})
             </Text>
           </TouchableOpacity>
@@ -433,8 +433,8 @@ export default function SquadsScreen() {
             onPress={() => setActiveTab('CAMP_SYNC')}
           >
             <Wifi size={13} color={activeTab === 'CAMP_SYNC' ? FieldColors.rescueOrange : '#888'} />
-            <Text style={[styles.subTabText, activeTab === 'CAMP_SYNC' && styles.subTabTextActive]}>
-              CAMP FILE SYNC ({mediaPool.filter((m) => !m.isSynced).length} MISSING)
+            <Text style={[styles.subTabText, activeTab === 'CAMP_SYNC' && styles.subTabTextActive]} numberOfLines={1}>
+              CAMP SYNC ({mediaPool.filter((m) => !m.isSynced).length})
             </Text>
           </TouchableOpacity>
 
@@ -443,8 +443,8 @@ export default function SquadsScreen() {
             onPress={() => setActiveTab('RADAR')}
           >
             <Compass size={13} color={activeTab === 'RADAR' ? FieldColors.rescueOrange : '#888'} />
-            <Text style={[styles.subTabText, activeTab === 'RADAR' && styles.subTabTextActive]}>
-              RADAR & NODES ({nodes.length})
+            <Text style={[styles.subTabText, activeTab === 'RADAR' && styles.subTabTextActive]} numberOfLines={1}>
+              RADAR ({nodes.length})
             </Text>
           </TouchableOpacity>
         </View>
@@ -862,11 +862,12 @@ const styles = StyleSheet.create({
   },
   subTab: {
     flex: 1,
+    height: 40,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
-    paddingVertical: 6,
+    paddingHorizontal: 4,
     backgroundColor: '#161D19',
     borderColor: '#253029',
     borderWidth: 1,

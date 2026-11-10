@@ -1,3 +1,5 @@
+import { parseSoiFilenameOrCode, SoiAnalyzerService, generateWindingRidgeline } from './soiAnalyzerService';
+
 export interface SoiCandidatePoint {
   latitude: number;
   longitude: number;
@@ -32,7 +34,9 @@ export class SoiAnalysisService {
    * Analyzes an SOI sheet for topographical ridgelines and candidate trails.
    */
   static async analyzeSheet(sheetOrUri: string, fileName?: string): Promise<SoiAnalysisResult> {
-    const sheetNumber = fileName ? fileName.replace(/\.[^/.]+$/, '').toUpperCase() : sheetOrUri;
+    const rawTarget = fileName || sheetOrUri;
+    const parsed = parseSoiFilenameOrCode(rawTarget);
+    const sheetNumber = parsed.evertonCode;
     const safeName = sheetNumber.replace(/[^a-zA-Z0-9]/g, '_');
 
     try {
@@ -56,9 +60,9 @@ export class SoiAnalysisService {
         if (data && Array.isArray(data.candidates)) {
           const candidates: SoiCandidateTrail[] = data.candidates.map((c: any, idx: number) => {
             const coords: [number, number, number][] = (c.coordinates ?? []).map((pt: any) => [
-              pt[0] ?? pt.lat ?? pt.latitude ?? 31.0772,
-              pt[1] ?? pt.lon ?? pt.longitude ?? 78.1831,
-              pt[2] ?? pt.ele ?? pt.elevation ?? 2000,
+              pt[0] ?? pt.lat ?? pt.latitude ?? parsed.center[0],
+              pt[1] ?? pt.lon ?? pt.longitude ?? parsed.center[1],
+              pt[2] ?? pt.ele ?? pt.elevation ?? 1200,
             ]);
             return {
               id: c.id ?? `cand_${idx}`,
@@ -71,8 +75,8 @@ export class SoiAnalysisService {
               points: coords.map(([lat, lon, ele]) => ({ latitude: lat, longitude: lon, elevation: ele })),
               distanceKm: c.distanceKm ?? c.distance_km ?? 10.0,
               distance_km: c.distance_km ?? c.distanceKm ?? 10.0,
-              elevationGainM: c.elevationGainM ?? c.elevation_gain_m ?? 1200,
-              elevation_gain_m: c.elevation_gain_m ?? c.elevationGainM ?? 1200,
+              elevationGainM: c.elevationGainM ?? c.elevation_gain_m ?? 800,
+              elevation_gain_m: c.elevation_gain_m ?? c.elevationGainM ?? 800,
               water_crossings: c.water_crossings ?? 2,
             };
           });
@@ -87,21 +91,40 @@ export class SoiAnalysisService {
       console.warn('Backend SOI analysis service offline or network error, using client-side carto analyzer:', e);
     }
 
-    // High-fidelity fallback candidate trails
-    const coords1: [number, number, number][] = [
-      [31.0772, 78.1831, 1950],
-      [31.0690, 78.1910, 2400],
-      [31.0580, 78.2010, 2950],
-      [31.0460, 78.2045, 3430],
-      [31.0238, 78.1722, 3810],
-    ];
+    // Dynamic procedural candidate trails calculated strictly inside the sheet's bounding box using winding ridgelines
+    const [sw, ne] = parsed.bounds;
+    const latSpan = ne[0] - sw[0];
+    const lonSpan = ne[1] - sw[1];
+    const s = sw[0];
+    const w = sw[1];
+    const n = ne[0];
+    const e = ne[1];
 
-    const coords2: [number, number, number][] = [
-      [31.0710, 78.1780, 2020],
-      [31.0590, 78.1880, 2550],
-      [31.0420, 78.1920, 3120],
-      [31.0280, 78.1760, 3650],
-    ];
+    const pts1 = generateWindingRidgeline(
+      s + latSpan * 0.12,
+      w + lonSpan * 0.18,
+      n - latSpan * 0.14,
+      e - lonSpan * 0.22,
+      0.65
+    );
+    const coords1: [number, number, number][] = pts1.map(([lat, lon], idx) => [
+      lat,
+      lon,
+      Math.round(1120 + Math.sin((idx / pts1.length) * Math.PI) * 450),
+    ]);
+
+    const pts2 = generateWindingRidgeline(
+      n - latSpan * 0.15,
+      w + lonSpan * 0.22,
+      s + latSpan * 0.18,
+      e - lonSpan * 0.25,
+      2.45
+    );
+    const coords2: [number, number, number][] = pts2.map(([lat, lon], idx) => [
+      lat,
+      lon,
+      Math.round(1050 + (idx / pts2.length) * 380),
+    ]);
 
     return {
       sheetNumber,
@@ -117,23 +140,23 @@ export class SoiAnalysisService {
           points: coords1.map(([lat, lon, ele]) => ({ latitude: lat, longitude: lon, elevation: ele })),
           distanceKm: 11.2,
           distance_km: 11.2,
-          elevationGainM: 1860,
-          elevation_gain_m: 1860,
+          elevationGainM: 800,
+          elevation_gain_m: 800,
           water_crossings: 2,
         },
         {
           id: `soi_cand_${safeName}_2`,
-          name: `South Glacial Stream Corridor (${sheetNumber})`,
+          name: `River Valley Corridor (${sheetNumber})`,
           type: 'valley',
           confidence: 0.82,
           confidence_pct: 82,
-          description: 'Perennial glacial valley traverse • Gentle gradient • Continuous water availability',
+          description: 'Perennial stream traverse • Gentle gradient • Continuous water availability',
           coordinates: coords2,
           points: coords2.map(([lat, lon, ele]) => ({ latitude: lat, longitude: lon, elevation: ele })),
           distanceKm: 8.7,
           distance_km: 8.7,
-          elevationGainM: 1630,
-          elevation_gain_m: 1630,
+          elevationGainM: 560,
+          elevation_gain_m: 560,
           water_crossings: 4,
         },
       ],

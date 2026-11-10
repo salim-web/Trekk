@@ -92,45 +92,47 @@ export default function SavedScreen() {
               <View style={styles.stravaBadge}>
                 <Text style={styles.stravaBadgeText}>STRAVA</Text>
               </View>
-              <View>
-                <Text style={styles.stravaStatus}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.stravaStatus} numberOfLines={1} ellipsizeMode="tail">
                   {stravaToken ? `CONNECTED: ${athleteName || 'ATHLETE'}` : 'DISCONNECTED'}
                 </Text>
                 {stravaToken && (
-                  <Text style={styles.stravaModeSub}>
+                  <Text style={styles.stravaModeSub} numberOfLines={1}>
                     {stravaToken === 'demo_token' ? 'MODE: LOCAL SANDBOX SIMULATOR' : 'MODE: LIVE STRAVA OAUTH'}
                   </Text>
                 )}
               </View>
             </View>
 
-            {stravaToken ? (
-              <View style={styles.connectedRightGroup}>
-                <View style={styles.liveTag}>
-                  <CheckCircle2 size={12} color={FieldColors.mossNeon} />
-                  <Text style={styles.liveTagText}>
-                    {stravaToken === 'demo_token' ? 'SANDBOX' : 'LIVE'}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.cardDisconnectBtn}
-                  onPress={async () => {
-                    await StravaService.disconnect();
-                    setStravaToken(null);
-                    setAthleteName(null);
-                    Alert.alert('Strava Disconnected', 'Logged out of Strava. You can now connect a live account or re-enter sandbox mode.');
-                  }}
-                >
-                  <LogOut size={12} color="#EF4444" />
-                  <Text style={styles.cardDisconnectBtnText}>DISCONNECT</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
+            {!stravaToken && (
               <View style={styles.disconnectedTag}>
                 <Text style={styles.disconnectedText}>NOT LINKED</Text>
               </View>
             )}
           </View>
+
+          {stravaToken && (
+            <View style={styles.connectedButtonsRow}>
+              <View style={styles.liveTag}>
+                <CheckCircle2 size={12} color={FieldColors.mossNeon} />
+                <Text style={styles.liveTagText}>
+                  {stravaToken === 'demo_token' ? 'SANDBOX ACTIVE' : 'LIVE OAUTH'}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.cardDisconnectBtn}
+                onPress={async () => {
+                  await StravaService.disconnect();
+                  setStravaToken(null);
+                  setAthleteName(null);
+                  Alert.alert('Strava Disconnected', 'Logged out of Strava. You can now connect a live account or re-enter sandbox mode.');
+                }}
+              >
+                <LogOut size={12} color="#EF4444" />
+                <Text style={styles.cardDisconnectBtnText}>DISCONNECT / SWITCH</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           <Text style={styles.stravaDesc}>
             Repair smartband missing GPS polylines with 30m CartoDEM elevation and push verified activities to Strava.
@@ -413,6 +415,13 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#FFFFFF',
     letterSpacing: 0.5,
+  },
+  connectedButtonsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+    marginBottom: 4,
   },
   liveTag: {
     flexDirection: 'row',

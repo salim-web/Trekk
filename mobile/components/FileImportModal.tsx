@@ -159,10 +159,9 @@ export const FileImportModal: React.FC<FileImportModalProps> = ({
         } catch (_) {}
       }
 
-      // Process georeferenced raster & extracted features
-      const matchedPreset = SOI_GRATICULE_PRESETS[0];
-      const result = await SoiAnalyzerService.processSoiSheet(
-        matchedPreset.sheetNumber,
+      // Process dynamically from the uploaded file name & contents (NO HARDCODED 53J/1!)
+      const result = await SoiAnalyzerService.processUploadedSheet(
+        fileName,
         file.uri,
         base64Data
       );
@@ -179,7 +178,7 @@ export const FileImportModal: React.FC<FileImportModalProps> = ({
       onClose();
       Alert.alert(
         'SOI Sheet Overlaid',
-        `Survey of India Sheet: ${result.sheetNumber}\nOverlaid 1:50,000 raster sheet with ${result.trails.length} extracted footpaths and ${result.pois.length} water springs / campsites.`
+        `Survey of India Sheet: ${result.sheetNumber} (${result.sheetName})\nOverlaid 1:50,000 raster sheet with ${result.trails.length} extracted footpaths and ${result.pois.length} water springs / campsites.`
       );
     } catch (err: any) {
       console.error('SOI sheet import error:', err);
@@ -193,7 +192,7 @@ export const FileImportModal: React.FC<FileImportModalProps> = ({
       setLoading(true);
       setStatusMessage(`Synthesizing Survey of India Sheet ${preset.sheetNumber} (1:50,000)...`);
 
-      const result = await SoiAnalyzerService.processSoiSheet(preset.sheetNumber);
+      const result = await SoiAnalyzerService.processUploadedSheet(preset.sheetNumber);
 
       if (onSoiSheetOverlaid) {
         onSoiSheetOverlaid(result);
