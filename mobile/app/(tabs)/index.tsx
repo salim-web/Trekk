@@ -19,6 +19,10 @@ import {
   X,
   Play,
   Share2,
+  Sliders,
+  Check,
+  Eye,
+  Camera,
 } from 'lucide-react-native';
 import { FieldColors, FieldTypography } from '../../constants/FieldTokens';
 import { SeededTrails, SEEDED_TRAILS, TrailModel } from '../../constants/SeededTrails';
@@ -27,16 +31,24 @@ import { ElevationChart } from '../../components/ElevationChart';
 import { FileImportModal } from '../../components/FileImportModal';
 import { SoiScanOverlay } from '../../components/SoiScanOverlay';
 import { KnurledButton } from '../../components/KnurledButton';
-import { DatabaseService } from '../../services/DatabaseService';
+import { DatabaseService, SquadMediaRecord } from '../../services/DatabaseService';
 import { ParsedTrack } from '../../services/TrackParser';
 import { SoiAnalysisResult, SoiCandidateTrail } from '../../services/SoiAnalysisService';
+import {
+  SoiExtractionResult,
+  ExtractedTrail,
+  SoiAnalyzerService,
+} from '../../services/soiAnalyzerService';
 
 type RegionFilter = 'ALL' | 'HIMALAYAS' | 'WESTERN_GHATS' | 'NORTH_EAST' | 'IMPORTED';
 
 // Default safe fallback trails
-const DEFAULT_FALLBACK_TRAILS: TrailModel[] = Array.isArray(SEEDED_TRAILS) && SEEDED_TRAILS.length > 0
-  ? SEEDED_TRAILS
-  : (Array.isArray(SeededTrails) && SeededTrails.length > 0 ? SeededTrails : []);
+const DEFAULT_FALLBACK_TRAILS: TrailModel[] =
+  Array.isArray(SEEDED_TRAILS) && SEEDED_TRAILS.length > 0
+    ? SEEDED_TRAILS
+    : Array.isArray(SeededTrails) && SeededTrails.length > 0
+    ? SeededTrails
+    : [];
 
 export default function TopoMapScreen() {
   const [activeFilter, setActiveFilter] = useState<RegionFilter>('ALL');
@@ -48,9 +60,23 @@ export default function TopoMapScreen() {
   const [savedCandidateIds, setSavedCandidateIds] = useState<string[]>([]);
   const [scrubbedElevation, setScrubbedElevation] = useState<number | null>(null);
 
-  // Load imported trails from SQLite on startup
+  // FEATURE 2: SOI Raster Overlay & Inspector State
+  const [soiOverlayData, setSoiOverlayData] = useState<SoiExtractionResult | null>(null);
+  const [soiOpacity, setSoiOpacity] = useState<number>(0.72);
+  const [layerVisibility, setLayerVisibility] = useState({
+    raw: true,
+    footpaths: true,
+    water: true,
+    camps: true,
+  });
+
+  // Synced Squad Photos from Camp Sync
+  const [squadPhotos, setSquadPhotos] = useState<SquadMediaRecord[]>([]);
+
+  // Load imported trails and synced squad photos on startup
   useEffect(() => {
     loadSavedTracks();
+    loadSquadPhotos();
   }, []);
 
   const loadSavedTracks = async () => {
@@ -90,6 +116,16 @@ export default function TopoMapScreen() {
       setImportedTrails(mappedTrails);
     } catch (e) {
       console.warn('Error loading saved tracks:', e);
+    }
+  };
+
+  const loadSquadPhotos = async () => {
+    try {
+      const media = await DatabaseService.getSquadMedia();
+      const photos = media.filter((m) => m.type === 'photo' && m.isSynced);
+      setSquadPhotos(photos);
+    } catch (e) {
+      console.warn('Error loading squad photos:', e);
     }
   };
 
@@ -159,37 +195,68 @@ export default function TopoMapScreen() {
     setActiveFilter('IMPORTED');
   };
 
+  const handleSoiSheetOverlaid = (result: SoiExtractionResult) => {
+    setSoiOverlayData(result);
+  };
+
   const handleSoiAnalyzed = (result: SoiAnalysisResult) => {
     if (!result) return;
     setSoiResult(result);
-    setSoiOverlayVisible(true);
   };
 
-  const handleSaveCandidateAsTrail = async (candidate: SoiCandidateTrail) => {
+  const handleSaveCandidateAsTrail = async (candidate: SoiCandidateTrail | ExtractedTrail) => {
     try {
       if (!candidate) return;
-      const pts = Array.isArray(candidate.points) ? candidate.points : [];
+      const coords = (candidate as any).coords || (candidate as any).coordinates || [];
+      const pts = (candidate as any).points || coords.map((c: any) => ({
+        latitude: c[0] ?? 0,
+        longitude: c[1] ?? 0,
+        elevation: c[2] ?? 2000,
+      }));
+
       const parsedTrack: ParsedTrack = {
-        name: candidate.name ?? 'SOI Candidate Trail',
-        sourceFormat: 'gpx',
-        points: pts.map((p) => ({
+        name: candidate.name ?? 'SOI Extracted Route',
+        sourceFormat: 'soi',
+        points: pts.map((p: any) => ({
           latitude: p.latitude ?? 0,
           longitude: p.longitude ?? 0,
           elevation: p.elevation ?? 0,
         })),
-        distanceKm: candidate.distanceKm ?? candidate.distance_km ?? 0,
-        elevationGainM: candidate.elevationGainM ?? candidate.elevation_gain_m ?? 0,
-        maxAltitudeM: Math.max(...pts.map((p) => p.elevation ?? 0), 2000),
-        minAltitudeM: Math.min(...pts.map((p) => p.elevation ?? 0), 1000),
+        distanceKm: (candidate as any).distanceKm ?? (candidate as any).distance_km ?? 10.0,
+        elevationGainM: (candidate as any).elevationGainM ?? (candidate as any).elevation_gain_m ?? (candidate as any).gain ?? 1200,
+        maxAltitudeM: Math.max(...pts.map((p: any) => p.elevation ?? 0), 2500),
+        minAltitudeM: Math.min(...pts.map((p: any) => p.elevation ?? 0), 1500),
       };
 
       const saved = await DatabaseService.saveImportedTrack(parsedTrack);
       setSavedCandidateIds((prev) => [...(prev ?? []), candidate.id]);
       handleTrackImported(saved);
-      Alert.alert('Trail Saved', `"${candidate.name}" has been permanently added to your offline topo trails!`);
+      Alert.alert(
+        'Trail Saved to Library',
+        `"${candidate.name}" has been permanently added to your offline Topo Library!`
+      );
     } catch (e: any) {
       Alert.alert('Save Failed', e?.message || 'Could not save candidate trail.');
     }
+  };
+
+  const handleSelectSoiExtractedTrail = (trail: ExtractedTrail) => {
+    // Show quick alert or convert to temporary selected trail
+    Alert.alert(
+      `SOI Trail: ${trail.name}`,
+      `• Match Confidence: ${trail.confidence}%\n• Elevation Gain: +${trail.gain}m\n• Stream Crossings: ${trail.waterCount}\n• Distance: ${trail.distanceKm.toFixed(1)} km`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Save to My Trails', onPress: () => handleSaveCandidateAsTrail(trail) },
+      ]
+    );
+  };
+
+  const adjustOpacity = (delta: number) => {
+    setSoiOpacity((prev) => {
+      const next = Math.min(1.0, Math.max(0.0, Math.round((prev + delta) * 100) / 100));
+      return next;
+    });
   };
 
   return (
@@ -203,6 +270,13 @@ export default function TopoMapScreen() {
         </View>
 
         <View style={styles.topRightControls}>
+          {squadPhotos.length > 0 && (
+            <View style={styles.photoCountBadge}>
+              <Camera size={12} color={FieldColors.glacierCyan} />
+              <Text style={styles.photoCountText}>{squadPhotos.length} SQUAD PINS</Text>
+            </View>
+          )}
+
           <View style={styles.batteryPill}>
             <BatteryCharging size={13} color={FieldColors.mossNeon} />
             <Text style={styles.batteryText}>88%</Text>
@@ -278,23 +352,112 @@ export default function TopoMapScreen() {
           trails={displayedTrails}
           selectedTrail={selectedTrail}
           soiCandidateTrails={soiResult?.candidateTrails ?? []}
+          soiOverlayData={soiOverlayData}
+          soiOpacity={soiOpacity}
+          squadPhotos={squadPhotos}
           onSelectTrail={(t) => setSelectedTrail(t)}
+          onSelectSoiTrail={handleSelectSoiExtractedTrail}
           onDeselect={() => setSelectedTrail(null)}
           regionFocus={activeFilter}
         />
 
-        {/* SOI Scan Floating Pill if sheets detected */}
-        {soiResult && (
-          <TouchableOpacity
-            style={styles.soiFloatingPill}
-            onPress={() => setSoiOverlayVisible(true)}
-            activeOpacity={0.8}
-          >
-            <Layers size={14} color="#D8B4FE" />
-            <Text style={styles.soiFloatingText}>
-              SOI {soiResult.sheetNumber ?? 'MAP'} ({(soiResult.candidateTrails ?? []).length} TRAILS DETECTED)
-            </Text>
-          </TouchableOpacity>
+        {/* FEATURE 2: Floating SOI Sheet Inspector Bar */}
+        {soiOverlayData && (
+          <View style={styles.soiInspectorBar}>
+            {/* Inspector Top Row: Sheet info & Close */}
+            <View style={styles.soiInspectorHeader}>
+              <View style={styles.soiSheetPill}>
+                <Layers size={13} color={FieldColors.contourOchre} />
+                <Text style={styles.soiSheetPillText}>
+                  SOI SHEET {soiOverlayData.sheetNumber} ({soiOverlayData.sheetName})
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.soiCloseBtn}
+                onPress={() => setSoiOverlayData(null)}
+              >
+                <X size={15} color={FieldColors.parchment} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Tactile Opacity Stepper & Presets */}
+            <View style={styles.opacityControlRow}>
+              <Text style={styles.opacityLabel}>OPACITY:</Text>
+              <TouchableOpacity
+                style={styles.opacityStepBtn}
+                onPress={() => adjustOpacity(-0.15)}
+              >
+                <Text style={styles.opacityStepText}>- 15%</Text>
+              </TouchableOpacity>
+
+              <View style={styles.opacityValuePill}>
+                <Sliders size={12} color={FieldColors.mossNeon} />
+                <Text style={styles.opacityValueText}>{Math.round(soiOpacity * 100)}%</Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.opacityStepBtn}
+                onPress={() => adjustOpacity(0.15)}
+              >
+                <Text style={styles.opacityStepText}>+ 15%</Text>
+              </TouchableOpacity>
+
+              {/* Quick Presets */}
+              <View style={styles.presetButtons}>
+                {[0.25, 0.5, 0.75, 1.0].map((presetVal) => (
+                  <TouchableOpacity
+                    key={presetVal}
+                    style={[
+                      styles.presetPill,
+                      Math.abs(soiOpacity - presetVal) < 0.08 && styles.presetPillActive,
+                    ].filter(Boolean)}
+                    onPress={() => setSoiOpacity(presetVal)}
+                  >
+                    <Text
+                      style={[
+                        styles.presetText,
+                        Math.abs(soiOpacity - presetVal) < 0.08 && styles.presetTextActive,
+                      ].filter(Boolean)}
+                    >
+                      {Math.round(presetVal * 100)}%
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Extracted Layers Summary & Action */}
+            <View style={styles.soiMetaRow}>
+              <View style={styles.featureBadges}>
+                <View style={styles.featBadge}>
+                  <Text style={[styles.featText, { color: '#A855F7' }]}>
+                    {soiOverlayData.trails.length} Footpaths
+                  </Text>
+                </View>
+                <View style={styles.featBadge}>
+                  <Text style={[styles.featText, { color: '#38BDF8' }]}>
+                    {soiOverlayData.pois.filter((p) => p.type === 'water').length} Springs
+                  </Text>
+                </View>
+                <View style={styles.featBadge}>
+                  <Text style={[styles.featText, { color: '#FACC15' }]}>
+                    {soiOverlayData.pois.filter((p) => p.type === 'camp').length} Camps
+                  </Text>
+                </View>
+              </View>
+
+              {soiOverlayData.trails.length > 0 && (
+                <TouchableOpacity
+                  style={styles.saveRouteBtn}
+                  onPress={() => handleSaveCandidateAsTrail(soiOverlayData.trails[0])}
+                >
+                  <Plus size={12} color="#0F1210" />
+                  <Text style={styles.saveRouteBtnText}>SAVE ROUTE</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
         )}
       </View>
 
@@ -403,9 +566,10 @@ export default function TopoMapScreen() {
         onClose={() => setImportModalVisible(false)}
         onTrackImported={handleTrackImported}
         onSoiAnalyzed={handleSoiAnalyzed}
+        onSoiSheetOverlaid={handleSoiSheetOverlaid}
       />
 
-      {/* SOI Topo Sheet Overlay */}
+      {/* Legacy SOI Topo Sheet Overlay Modal */}
       <SoiScanOverlay
         visible={soiOverlayVisible}
         result={soiResult}
@@ -448,33 +612,44 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
     color: FieldColors.parchment,
-    letterSpacing: 0.5,
   },
   elevationBadge: {
     fontFamily: FieldTypography.mono,
-    fontSize: 10,
-    fontWeight: '800',
+    fontSize: 11,
     color: FieldColors.contourOchre,
-    backgroundColor: '#262013',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 3,
   },
   topRightControls: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
+  photoCountBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#0C2836',
+    borderColor: FieldColors.glacierCyan,
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  photoCountText: {
+    fontFamily: FieldTypography.mono,
+    fontSize: 9,
+    fontWeight: '800',
+    color: FieldColors.glacierCyan,
+  },
   batteryPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: '#16231C',
+    backgroundColor: '#1C2620',
+    borderColor: '#2A3A30',
+    borderWidth: 1,
+    borderRadius: 4,
     paddingHorizontal: 6,
     paddingVertical: 3,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: '#243A2F',
   },
   batteryText: {
     fontFamily: FieldTypography.mono,
@@ -483,32 +658,32 @@ const styles = StyleSheet.create({
     color: FieldColors.mossNeon,
   },
   chipsContainer: {
-    backgroundColor: '#151C18',
-    borderBottomWidth: 1,
-    borderBottomColor: '#242F28',
+    backgroundColor: '#141A16',
+    borderBottomWidth: 1.5,
+    borderBottomColor: '#232D27',
     paddingVertical: 6,
   },
   chipsScroll: {
     paddingHorizontal: 10,
-    gap: 8,
+    gap: 6,
   },
   filterChip: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 4,
-    backgroundColor: '#1E2721',
     borderWidth: 1,
-    borderColor: '#2C3A31',
+    borderColor: '#2D3A32',
+    backgroundColor: '#19221C',
   },
   filterChipActive: {
     backgroundColor: FieldColors.rescueOrange,
-    borderColor: '#FF7733',
+    borderColor: FieldColors.rescueOrange,
   },
   filterChipText: {
     fontFamily: FieldTypography.mono,
     fontSize: 10,
     fontWeight: '800',
-    color: '#8A9991',
+    color: '#8E9E94',
     letterSpacing: 0.5,
   },
   filterChipTextActive: {
@@ -518,67 +693,170 @@ const styles = StyleSheet.create({
     flex: 1,
     position: 'relative',
   },
-  soiFloatingPill: {
+  soiInspectorBar: {
     position: 'absolute',
-    top: 12,
-    left: 12,
-    right: 12,
+    bottom: 12,
+    left: 10,
+    right: 10,
+    backgroundColor: '#121714EE',
+    borderColor: FieldColors.contourOchre,
+    borderWidth: 1.5,
+    borderRadius: 8,
+    padding: 10,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.8,
+    shadowRadius: 10,
+  },
+  soiInspectorHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  soiSheetPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 6,
-    backgroundColor: 'rgba(30, 22, 40, 0.95)',
-    paddingVertical: 7,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    borderWidth: 1.5,
-    borderColor: '#A855F7',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.6,
-    shadowRadius: 8,
   },
-  soiFloatingText: {
+  soiSheetPillText: {
     fontFamily: FieldTypography.mono,
-    fontSize: 10.5,
+    fontSize: 11,
     fontWeight: '900',
-    color: '#E9D5FF',
+    color: FieldColors.contourOchre,
     letterSpacing: 0.5,
   },
+  soiCloseBtn: {
+    padding: 4,
+  },
+  opacityControlRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexWrap: 'wrap',
+  },
+  opacityLabel: {
+    fontFamily: FieldTypography.mono,
+    fontSize: 10,
+    fontWeight: '800',
+    color: FieldColors.parchment,
+  },
+  opacityStepBtn: {
+    backgroundColor: '#1F2922',
+    borderColor: '#36483C',
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  opacityStepText: {
+    fontFamily: FieldTypography.mono,
+    fontSize: 9,
+    fontWeight: '800',
+    color: FieldColors.parchment,
+  },
+  opacityValuePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#17221A',
+    borderColor: FieldColors.mossNeon,
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  opacityValueText: {
+    fontFamily: FieldTypography.mono,
+    fontSize: 11,
+    fontWeight: '900',
+    color: FieldColors.mossNeon,
+  },
+  presetButtons: {
+    flexDirection: 'row',
+    gap: 4,
+    marginLeft: 'auto',
+  },
+  presetPill: {
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderRadius: 3,
+    backgroundColor: '#1E2822',
+  },
+  presetPillActive: {
+    backgroundColor: FieldColors.contourOchre,
+  },
+  presetText: {
+    fontFamily: FieldTypography.mono,
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#888',
+  },
+  presetTextActive: {
+    color: '#0F1210',
+  },
+  soiMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: '#202A24',
+    paddingTop: 6,
+  },
+  featureBadges: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  featBadge: {
+    backgroundColor: '#18221B',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  featText: {
+    fontFamily: FieldTypography.mono,
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  saveRouteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: FieldColors.mossNeon,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  saveRouteBtnText: {
+    fontFamily: FieldTypography.mono,
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#0F1210',
+  },
   inspectionCard: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: FieldColors.obsidianBasalt,
+    backgroundColor: '#131915',
     borderTopWidth: 2,
-    borderTopColor: FieldColors.contourOchre,
-    padding: 14,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 14,
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -6 },
-    shadowOpacity: 0.7,
-    shadowRadius: 12,
+    borderTopColor: FieldColors.rescueOrange,
+    padding: 12,
+    gap: 10,
+    maxHeight: 280,
   },
   inspectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 10,
   },
   badgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
     marginBottom: 4,
   },
   tagBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 3,
     borderWidth: 1,
+    borderRadius: 3,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
   },
   tagBadgeText: {
     fontFamily: FieldTypography.mono,
@@ -589,54 +867,50 @@ const styles = StyleSheet.create({
   difficultyTag: {
     fontFamily: FieldTypography.mono,
     fontSize: 9,
-    fontWeight: '700',
-    color: '#9EAEA5',
+    fontWeight: '800',
+    color: FieldColors.contourOchre,
   },
   inspectionTrailName: {
     fontFamily: FieldTypography.mono,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '900',
     color: FieldColors.parchment,
-    letterSpacing: 0.5,
   },
   inspectionCloseBtn: {
     padding: 4,
-    backgroundColor: FieldColors.deepPine,
-    borderRadius: 4,
   },
   metricsBar: {
     flexDirection: 'row',
-    backgroundColor: FieldColors.deepPine,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#29352E',
-    paddingVertical: 6,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#18201B',
+    borderRadius: 4,
     paddingHorizontal: 8,
-    marginBottom: 10,
+    paddingVertical: 6,
   },
   metricItem: {
-    flex: 1,
     alignItems: 'center',
   },
   metricLabel: {
     fontFamily: FieldTypography.mono,
-    fontSize: 8.5,
-    color: '#7C8C83',
-    fontWeight: '700',
+    fontSize: 8,
+    color: '#7E9185',
+    letterSpacing: 0.5,
   },
   metricVal: {
     fontFamily: FieldTypography.mono,
-    fontSize: 11.5,
-    fontWeight: '800',
+    fontSize: 11,
+    fontWeight: '900',
     color: FieldColors.parchment,
-    marginTop: 2,
+    marginTop: 1,
   },
   metricDivider: {
     width: 1,
-    backgroundColor: '#29352E',
+    height: 16,
+    backgroundColor: '#2A362E',
   },
   chartWrapper: {
-    marginBottom: 10,
+    marginTop: 2,
   },
   actionRow: {
     marginTop: 4,

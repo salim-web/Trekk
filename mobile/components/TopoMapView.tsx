@@ -4,12 +4,18 @@ import { WebView } from 'react-native-webview';
 import { TrailModel } from '../constants/SeededTrails';
 import { FieldColors } from '../constants/FieldTokens';
 import { SoiCandidateTrail } from '../services/SoiAnalysisService';
+import { SoiExtractionResult, ExtractedTrail } from '../services/soiAnalyzerService';
+import { SquadMediaRecord } from '../services/DatabaseService';
 
 interface TopoMapViewProps {
   trails: TrailModel[];
   selectedTrail?: TrailModel | null;
   soiCandidateTrails?: SoiCandidateTrail[];
+  soiOverlayData?: SoiExtractionResult | null;
+  soiOpacity?: number;
+  squadPhotos?: SquadMediaRecord[];
   onSelectTrail: (trail: TrailModel) => void;
+  onSelectSoiTrail?: (trail: ExtractedTrail) => void;
   onDeselect: () => void;
   regionFocus?: string;
 }
@@ -18,14 +24,18 @@ export const TopoMapView: React.FC<TopoMapViewProps> = ({
   trails,
   selectedTrail,
   soiCandidateTrails = [],
+  soiOverlayData = null,
+  soiOpacity = 0.72,
+  squadPhotos = [],
   onSelectTrail,
+  onSelectSoiTrail,
   onDeselect,
   regionFocus,
 }) => {
   const webViewRef = useRef<WebView>(null);
   const isMapReadyRef = useRef<boolean>(false);
 
-  // CRITICAL FIX: Memoize HTML with EMPTY dependencies [] so WebView NEVER unmounts or reloads!
+  // CRITICAL: Memoize HTML with EMPTY dependencies [] so WebView NEVER unmounts or reloads!
   const initialMapHtml = useMemo(() => {
     return `
 <!DOCTYPE html>
@@ -61,6 +71,29 @@ export const TopoMapView: React.FC<TopoMapViewProps> = ({
       white-space: nowrap;
       box-shadow: 0 2px 4px rgba(0,0,0,0.5);
     }
+    .photo-pin {
+      background: #0F1210;
+      color: #38BDF8;
+      border: 1.8px solid #38BDF8;
+      font-family: monospace;
+      font-size: 9px;
+      font-weight: 800;
+      padding: 2px 5px;
+      border-radius: 4px;
+      white-space: nowrap;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.7);
+    }
+    .leaflet-popup-content-wrapper {
+      background: #171D19 !important;
+      color: #F7F5F0 !important;
+      border: 1px solid #D99B26;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 11px;
+    }
+    .leaflet-popup-tip {
+      background: #171D19 !important;
+    }
     .leaflet-control-attribution { background: rgba(15,18,16,0.8) !important; color: #888 !important; font-size: 8px !important; }
   </style>
 </head>
@@ -80,6 +113,17 @@ export const TopoMapView: React.FC<TopoMapViewProps> = ({
     var selectedId = '';
     var candidateTrails = [];
     var layersGroup = L.featureGroup().addTo(map);
+
+    // SOI Overlay Layers
+    window.soiImageLayer = null;
+    window.soiExtractedLayer = L.layerGroup().addTo(map);
+    window.soiFootpathsSublayer = L.layerGroup().addTo(window.soiExtractedLayer);
+    window.soiWaterSublayer = L.layerGroup().addTo(window.soiExtractedLayer);
+    window.soiCampsSublayer = L.layerGroup().addTo(window.soiExtractedLayer);
+    window.soiPeaksSublayer = L.layerGroup().addTo(window.soiExtractedLayer);
+
+    // Squad Photo Pins Layer
+    window.squadPhotosLayer = L.layerGroup().addTo(map);
 
     function renderTrails() {
       layersGroup.clearLayers();
@@ -219,6 +263,153 @@ export const TopoMapView: React.FC<TopoMapViewProps> = ({
       }
     };
 
+    // FEATURE 2: SOI Raster Image Overlay & Vector Extraction Engine
+    window.overlaySoiSheet = function(imageDataUri, bounds, extractedFeatures, opacity) {
+      if (window.soiImageLayer) {
+        map.removeLayer(window.soiImageLayer);
+        window.soiImageLayer = null;
+      }
+
+      // Add true georeferenced raster image overlay
+      window.soiImageLayer = L.imageOverlay(imageDataUri, bounds, {
+        opacity: opacity !== undefined ? opacity : 0.72,
+        interactive: true
+      }).addTo(map);
+
+      // Clear existing sublayers
+      window.soiFootpathsSublayer.clearLayers();
+      window.soiWaterSublayer.clearLayers();
+      window.soiCampsSublayer.clearLayers();
+      window.soiPeaksSublayer.clearLayers();
+
+      // 1. Extracted Footpaths / Candidate Treks (Dashed Violet/Magenta)
+      (extractedFeatures.trails || []).forEach(function(t) {
+        var latLngs = (t.coords || []).map(function(c) { return [c[0], c[1]]; });
+        var poly = L.polyline(latLngs, {
+          color: '#A855F7',
+          weight: 4.5,
+          opacity: 0.95,
+          dashArray: '8, 6'
+        }).bindPopup(
+          '<div style=\"padding:4px;\">' +
+          '<b style=\"color:#A855F7;\">🗺 SOI EXTRACTED TRAIL</b><br/>' +
+          '<b style=\"font-size:12px;\">' + t.name + '</b><br/>' +
+          'Confidence: <b style=\"color:#4ADE80;\">' + t.confidence + '%</b><br/>' +
+          'Elev Gain: +' + t.gain + 'm | ' + t.waterCount + ' Water Crossings<br/>' +
+          '<span style=\"color:#888;\">Distance: ' + (t.distanceKm || 0) + ' km</span>' +
+          '</div>'
+        );
+
+        poly.on('click', function(e) {
+          L.DomEvent.stopPropagation(e);
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'SELECT_SOI_FEATURE', id: t.id, trail: t }));
+        });
+
+        window.soiFootpathsSublayer.addLayer(poly);
+      });
+
+      // 2. Extracted Water Springs, Campsites & Spot Heights
+      (extractedFeatures.pois || []).forEach(function(p) {
+        var color = p.type === 'water' ? '#38BDF8' : p.type === 'camp' ? '#FACC15' : '#FF5500';
+        var marker = L.circleMarker([p.lat, p.lon], {
+          radius: 7,
+          fillColor: color,
+          color: '#0F1210',
+          weight: 2,
+          fillOpacity: 0.95
+        }).bindPopup(
+          '<div style=\"padding:4px;\">' +
+          '<b style=\"color:' + color + ';\">● ' + p.type.toUpperCase() + ' POINT</b><br/>' +
+          '<b>' + p.label + '</b><br/>' +
+          'Elevation: ' + p.ele + 'm (SOI Sheet)' +
+          '</div>'
+        );
+
+        if (p.type === 'water') {
+          window.soiWaterSublayer.addLayer(marker);
+        } else if (p.type === 'camp') {
+          window.soiCampsSublayer.addLayer(marker);
+        } else {
+          window.soiPeaksSublayer.addLayer(marker);
+        }
+      });
+
+      map.flyToBounds(bounds, { padding: [30, 30], duration: 1.2 });
+    };
+
+    window.setSoiOverlayOpacity = function(val) {
+      if (window.soiImageLayer) {
+        window.soiImageLayer.setOpacity(val);
+      }
+    };
+
+    window.toggleSoiLayer = function(layerType, isVisible) {
+      if (layerType === 'raw' && window.soiImageLayer) {
+        if (isVisible) {
+          if (!map.hasLayer(window.soiImageLayer)) map.addLayer(window.soiImageLayer);
+        } else {
+          if (map.hasLayer(window.soiImageLayer)) map.removeLayer(window.soiImageLayer);
+        }
+      } else if (layerType === 'footpaths') {
+        if (isVisible) {
+          if (!window.soiExtractedLayer.hasLayer(window.soiFootpathsSublayer)) window.soiExtractedLayer.addLayer(window.soiFootpathsSublayer);
+        } else {
+          if (window.soiExtractedLayer.hasLayer(window.soiFootpathsSublayer)) window.soiExtractedLayer.removeLayer(window.soiFootpathsSublayer);
+        }
+      } else if (layerType === 'water') {
+        if (isVisible) {
+          if (!window.soiExtractedLayer.hasLayer(window.soiWaterSublayer)) window.soiExtractedLayer.addLayer(window.soiWaterSublayer);
+        } else {
+          if (window.soiExtractedLayer.hasLayer(window.soiWaterSublayer)) window.soiExtractedLayer.removeLayer(window.soiWaterSublayer);
+        }
+      } else if (layerType === 'camps') {
+        if (isVisible) {
+          if (!window.soiExtractedLayer.hasLayer(window.soiCampsSublayer)) window.soiExtractedLayer.addLayer(window.soiCampsSublayer);
+        } else {
+          if (window.soiExtractedLayer.hasLayer(window.soiCampsSublayer)) window.soiExtractedLayer.removeLayer(window.soiCampsSublayer);
+        }
+      }
+    };
+
+    window.removeSoiOverlay = function() {
+      if (window.soiImageLayer) {
+        map.removeLayer(window.soiImageLayer);
+        window.soiImageLayer = null;
+      }
+      window.soiFootpathsSublayer.clearLayers();
+      window.soiWaterSublayer.clearLayers();
+      window.soiCampsSublayer.clearLayers();
+      window.soiPeaksSublayer.clearLayers();
+    };
+
+    // Render Synced Squad Photos directly onto the map
+    window.renderSquadPhotoPins = function(photosList) {
+      window.squadPhotosLayer.clearLayers();
+      (photosList || []).forEach(function(photo) {
+        if (!photo.lat || !photo.lon) return;
+
+        var iconHtml = '<div class=\"photo-pin\">📸 ' + (photo.name || 'Photo').split('.')[0].substring(0, 10) + '</div>';
+        var pinIcon = L.divIcon({
+          className: 'photo-icon-wrapper',
+          html: iconHtml,
+          iconSize: null
+        });
+
+        var marker = L.marker([photo.lat, photo.lon], { icon: pinIcon })
+          .bindPopup(
+            '<div style=\"padding:4px;\">' +
+            '<b style=\"color:#38BDF8;\">📸 SQUAD PHOTO PIN</b><br/>' +
+            '<b>' + photo.name + '</b><br/>' +
+            'Sender: ' + photo.senderName + '<br/>' +
+            'Altitude: ' + Math.round(photo.ele || 0) + 'm<br/>' +
+            'SHA-256: ' + (photo.sha256 ? photo.sha256.substring(0, 12) + '...' : 'N/A') +
+            '</div>'
+          );
+
+        window.squadPhotosLayer.addLayer(marker);
+      });
+    };
+
     // Notify React Native that Leaflet engine is mounted
     setTimeout(function() {
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'MAP_READY' }));
@@ -248,6 +439,26 @@ export const TopoMapView: React.FC<TopoMapViewProps> = ({
   const handleLoadEnd = () => {
     isMapReadyRef.current = true;
     syncTrailsToMap(true);
+    if (soiOverlayData) {
+      applySoiOverlay(soiOverlayData, soiOpacity);
+    }
+    if (squadPhotos.length > 0) {
+      syncSquadPhotos(squadPhotos);
+    }
+  };
+
+  const applySoiOverlay = (data: SoiExtractionResult, opacity: number) => {
+    const boundsJson = JSON.stringify(data.bounds);
+    const featuresJson = JSON.stringify({
+      trails: data.trails,
+      pois: data.pois,
+    });
+    runScript(`window.overlaySoiSheet('${data.imageDataUri}', ${boundsJson}, ${featuresJson}, ${opacity})`);
+  };
+
+  const syncSquadPhotos = (photos: SquadMediaRecord[]) => {
+    const payload = JSON.stringify(photos);
+    runScript(`window.renderSquadPhotoPins(${payload})`);
   };
 
   // Sync trails when dataset or candidates change
@@ -256,6 +467,28 @@ export const TopoMapView: React.FC<TopoMapViewProps> = ({
       syncTrailsToMap(false);
     }
   }, [trails, soiCandidateTrails]);
+
+  // Handle SOI Overlay Data Changes
+  useEffect(() => {
+    if (!isMapReadyRef.current) return;
+    if (soiOverlayData) {
+      applySoiOverlay(soiOverlayData, soiOpacity);
+    } else {
+      runScript(`window.removeSoiOverlay()`);
+    }
+  }, [soiOverlayData]);
+
+  // Handle Opacity Changes smoothly
+  useEffect(() => {
+    if (!isMapReadyRef.current) return;
+    runScript(`window.setSoiOverlayOpacity(${soiOpacity})`);
+  }, [soiOpacity]);
+
+  // Handle Squad Photos
+  useEffect(() => {
+    if (!isMapReadyRef.current) return;
+    syncSquadPhotos(squadPhotos);
+  }, [squadPhotos]);
 
   // Handle Trail Selection & Camera Lock (Smooth flyToBounds without resetting)
   useEffect(() => {
@@ -269,7 +502,7 @@ export const TopoMapView: React.FC<TopoMapViewProps> = ({
     }
   }, [selectedTrail]);
 
-  // Handle Regional Filter Camera Flight (Flies directly to target region bounds)
+  // Handle Regional Filter Camera Flight
   useEffect(() => {
     if (!regionFocus || !isMapReadyRef.current) return;
 
@@ -277,25 +510,21 @@ export const TopoMapView: React.FC<TopoMapViewProps> = ({
     let bounds: [number, number][] = [];
 
     if (rf === 'HIMALAYAS') {
-      // Uttarakhand, Himachal, J&K, Ladakh, Sikkim
       bounds = [
         [27.0, 74.0],
         [35.5, 89.0],
       ];
     } else if (rf === 'WESTERN_GHATS' || rf === 'WESTERN GHATS') {
-      // Maharashtra & Karnataka
       bounds = [
         [12.66, 73.39],
         [19.63, 75.69],
       ];
     } else if (rf === 'NORTH_EAST' || rf === 'NORTH-EAST') {
-      // Meghalaya & Nagaland
       bounds = [
         [25.38, 91.73],
         [25.57, 94.12],
       ];
     } else if (rf === 'IMPORTED' || rf === 'USER IMPORTED') {
-      // User imported tracks bounding box
       const imported = (trails || []).filter((t) => t.isImported);
       const coords: [number, number][] = [];
       imported.forEach((t) => {
@@ -330,10 +559,20 @@ export const TopoMapView: React.FC<TopoMapViewProps> = ({
       if (data.type === 'MAP_READY') {
         isMapReadyRef.current = true;
         syncTrailsToMap(true);
+        if (soiOverlayData) {
+          applySoiOverlay(soiOverlayData, soiOpacity);
+        }
+        if (squadPhotos.length > 0) {
+          syncSquadPhotos(squadPhotos);
+        }
       } else if (data.type === 'SELECT_TRAIL') {
         const found = (trails || []).find((t) => t.id === data.id);
         if (found) {
           onSelectTrail(found);
+        }
+      } else if (data.type === 'SELECT_SOI_FEATURE') {
+        if (data.trail && onSelectSoiTrail) {
+          onSelectSoiTrail(data.trail);
         }
       } else if (data.type === 'DESELECT') {
         onDeselect();

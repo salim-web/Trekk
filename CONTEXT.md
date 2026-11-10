@@ -243,3 +243,15 @@ Local SQLite tables managed in `mobile/services/DatabaseService.ts` using `expo-
 - [x] Feature Update 1: Native on-map trail plotting with interactive markers, glowing selected state, camera bounds animation, and minimal dismissible inspection pill (bottom cards completely removed).
 - [x] Feature Update 2: Multi-format track parser (.GPX 1.1 with Garmin HR extension, .TCX with HeartRateBpm, binary .FIT with semicircles conversion) with `expo-document-picker` (`type: '*/*'`), `expo-file-system/legacy` literal encodings, and local SQLite persistence via `expo-sqlite`.
 - [x] Feature Update 3: Strava Integration with official OAuth2 `localhost` callback domain, `expo-secure-store` credentials persistence, athlete activities auditor, "Missing Map" detection & CartoDEM repair action with GPX 1.1 sharing via `expo-sharing`.
+- [x] Feature Update 4: P2P Mesh Messaging & Camp Sync File Sharing:
+  - 31-byte binary BLE advertisement packet encoder/decoder (`[2B Len][4B ServiceUUID][4B PartyHash][4B MsgID][1B MsgType_TTL][16B Payload]`) with 500-entry LRU deduplication, multi-hop TTL decrementing (4 hops max), and text chunker.
+  - Interactive dual-mode offline hub in `app/(tabs)/squads.tsx` (`Mesh Chat`, `Camp File Sync`, `Radar & Nodes`).
+  - Tactile quick-broadcast pills (`📍 GPS Pin`, `💧 Water Spring`, `⛺ Camp Pitching`, `🚨 SOS Priority Broadcast`).
+  - Media queuing on BLE mesh (`0x04 Media Notice`) + High-speed Wi-Fi Camp Sync with SHA-256 delta handshakes, chunk progress animations, and automatic map pin plotting.
+  - Simulation engine: `Simulate Incoming Squad Relay (2 Hops)` for multi-hop packet testing on single devices.
+- [x] Feature Update 5: Survey of India (SOI) Map Upload, Georeferenced Image Overlay, & Live Topo Extraction Engine:
+  - `expo-document-picker` (`*/*`) and `expo-file-system/legacy` upload flow supporting `.png`, `.jpg`, `.tif`, and `.pdf` SOI sheets.
+  - Sheet Graticule Selector (`53J/1 - Sankri/Kedarkantha`, `52H/8 - Hampta/Kullu`, `78O/11 - Mawphlang`, `83K/2 - Dzukou`) with true $15' \times 15'$ bounding boxes.
+  - 1-Tap Load Sample SOI Toposheet synthesizing authentic 1:50,000 vintage SVG raster sheet (20m brown contours `#8B5A2B`, red dashed footpaths `#DC2626`, blue perennial streams `#0284C7`, spot heights, triangulation markers).
+  - True georeferenced raster image overlay on Leaflet via `L.imageOverlay` with extracted candidate ridgeline/valley trails (`#A855F7`), perennial water springs (`#38BDF8`), flat campsites (`#FACC15`), and triangulated spot heights (`#FF5500`).
+  - Floating SOI Sheet Inspector Bar with live opacity stepper & preset pills (25%, 50%, 75%, 100%), feature counts, and `Save Route to My Trails` action adding candidates into local SQLite storage.

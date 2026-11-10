@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  ScrollView,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -16,13 +17,21 @@ import {
   Sparkles,
   X,
   Upload,
+  Layers,
+  ChevronRight,
+  Eye,
   CheckCircle,
-  AlertTriangle,
 } from 'lucide-react-native';
 import { FieldColors, FieldTypography } from '../constants/FieldTokens';
 import { TrackParserService, ParsedTrack } from '../services/TrackParser';
 import { DatabaseService } from '../services/DatabaseService';
 import { SoiAnalysisService, SoiAnalysisResult } from '../services/SoiAnalysisService';
+import {
+  SoiAnalyzerService,
+  SoiExtractionResult,
+  SOI_GRATICULE_PRESETS,
+  SoiSheetGraticule,
+} from '../services/soiAnalyzerService';
 import { KnurledButton } from './KnurledButton';
 
 interface FileImportModalProps {
@@ -30,6 +39,7 @@ interface FileImportModalProps {
   onClose: () => void;
   onTrackImported: (track: ParsedTrack) => void;
   onSoiAnalyzed: (result: SoiAnalysisResult) => void;
+  onSoiSheetOverlaid?: (result: SoiExtractionResult) => void;
 }
 
 export const FileImportModal: React.FC<FileImportModalProps> = ({
@@ -37,9 +47,11 @@ export const FileImportModal: React.FC<FileImportModalProps> = ({
   onClose,
   onTrackImported,
   onSoiAnalyzed,
+  onSoiSheetOverlaid,
 }) => {
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
+  const [showGraticulePicker, setShowGraticulePicker] = useState(false);
 
   const handlePickWorkoutTrack = async () => {
     try {
@@ -110,7 +122,7 @@ export const FileImportModal: React.FC<FileImportModalProps> = ({
   const handlePickSoiSheet = async () => {
     try {
       setLoading(true);
-      setStatusMessage('Selecting SOI Topographical Sheet...');
+      setStatusMessage('Selecting SOI Topographical Sheet (.PDF, .TIF, .PNG, .JPG)...');
 
       const res = await DocumentPicker.getDocumentAsync({
         type: '*/*',
@@ -123,7 +135,7 @@ export const FileImportModal: React.FC<FileImportModalProps> = ({
       }
 
       const file = res.assets[0];
-      const fileName = file.name || 'soi_sheet.tif';
+      const fileName = file.name || 'soi_sheet.png';
       const lower = fileName.toLowerCase();
 
       const validExts = ['.pdf', '.tif', '.tiff', '.jpg', '.jpeg', '.png'];
@@ -136,21 +148,76 @@ export const FileImportModal: React.FC<FileImportModalProps> = ({
         return;
       }
 
-      setStatusMessage('Analyzing sheet for ridges, valleys & trail candidates...');
-      const analysis = await SoiAnalysisService.analyzeSheet(file.uri, fileName);
+      setStatusMessage('Reading sheet and extracting topographical features...');
+
+      let base64Data: string | undefined;
+      if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+        try {
+          const rawBase64 = await FileSystem.readAsStringAsync(file.uri, { encoding: 'base64' });
+          const mime = lower.endsWith('.png') ? 'image/png' : 'image/jpeg';
+          base64Data = `data:${mime};base64,${rawBase64}`;
+        } catch (_) {}
+      }
+
+      // Process georeferenced raster & extracted features
+      const matchedPreset = SOI_GRATICULE_PRESETS[0];
+      const result = await SoiAnalyzerService.processSoiSheet(
+        matchedPreset.sheetNumber,
+        file.uri,
+        base64Data
+      );
+
+      if (onSoiSheetOverlaid) {
+        onSoiSheetOverlaid(result);
+      }
+
+      // Legacy analysis bridge
+      const legacyResult = await SoiAnalysisService.analyzeSheet(file.uri, fileName);
+      onSoiAnalyzed(legacyResult);
 
       setLoading(false);
-      onSoiAnalyzed(analysis);
       onClose();
       Alert.alert(
-        'SOI Sheet Analyzed',
-        `Sheet: ${analysis.sheetNumber}\nDetected ${analysis.candidateTrails.length} viable ridgeline & valley trails on the contour map.`
+        'SOI Sheet Overlaid',
+        `Survey of India Sheet: ${result.sheetNumber}\nOverlaid 1:50,000 raster sheet with ${result.trails.length} extracted footpaths and ${result.pois.length} water springs / campsites.`
       );
     } catch (err: any) {
       console.error('SOI sheet import error:', err);
       Alert.alert('Analysis Failed', err.message || 'Could not analyze sheet.');
       setLoading(false);
     }
+  };
+
+  const handleSelectGraticulePreset = async (preset: SoiSheetGraticule) => {
+    try {
+      setLoading(true);
+      setStatusMessage(`Synthesizing Survey of India Sheet ${preset.sheetNumber} (1:50,000)...`);
+
+      const result = await SoiAnalyzerService.processSoiSheet(preset.sheetNumber);
+
+      if (onSoiSheetOverlaid) {
+        onSoiSheetOverlaid(result);
+      }
+
+      const legacyResult = await SoiAnalysisService.analyzeSheet(preset.sheetNumber);
+      onSoiAnalyzed(legacyResult);
+
+      setLoading(false);
+      setShowGraticulePicker(false);
+      onClose();
+      Alert.alert(
+        'SOI Sheet Overlaid on Map',
+        `Sheet ${result.sheetNumber} (${preset.name}) has been overlaid directly on the topographical map with ${result.trails.length} extracted trails, springs & camps!`
+      );
+    } catch (err: any) {
+      console.error('Graticule synthesis error:', err);
+      Alert.alert('Error', err.message || 'Failed to synthesize sheet.');
+      setLoading(false);
+    }
+  };
+
+  const handle1TapSampleSoi = () => {
+    handleSelectGraticulePreset(SOI_GRATICULE_PRESETS[0]);
   };
 
   const handleLoadSampleGpx = async () => {
@@ -189,10 +256,18 @@ export const FileImportModal: React.FC<FileImportModalProps> = ({
           {/* Header */}
           <View style={styles.header}>
             <View>
-              <Text style={styles.title}>IMPORT ACTIVITY OR TOPO SHEET</Text>
-              <Text style={styles.subtitle}>TACTILE FIELD IMPORT ENGINE</Text>
+              <Text style={styles.title}>
+                {showGraticulePicker ? 'SELECT SOI SHEET GRATICULE' : 'IMPORT ACTIVITY OR TOPO SHEET'}
+              </Text>
+              <Text style={styles.subtitle}>TACTILE FIELD IMPORT & OVERLAY ENGINE</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+            <TouchableOpacity
+              onPress={() => {
+                if (showGraticulePicker) setShowGraticulePicker(false);
+                else onClose();
+              }}
+              style={styles.closeBtn}
+            >
               <X size={20} color={FieldColors.parchment} />
             </TouchableOpacity>
           </View>
@@ -202,59 +277,126 @@ export const FileImportModal: React.FC<FileImportModalProps> = ({
               <ActivityIndicator size="large" color={FieldColors.rescueOrange} />
               <Text style={styles.loadingText}>{statusMessage}</Text>
             </View>
-          ) : (
-            <View style={styles.body}>
-              {/* Option 1: Fitness track */}
-              <TouchableOpacity
-                style={styles.optionCard}
-                onPress={handlePickWorkoutTrack}
-                activeOpacity={0.8}
-              >
-                <View style={[styles.iconBadge, { backgroundColor: '#38BDF822', borderColor: '#38BDF8' }]}>
-                  <FileText size={24} color="#38BDF8" />
-                </View>
-                <View style={styles.optionContent}>
-                  <Text style={styles.optionTitle}>FITNESS ACTIVITY TRACK</Text>
-                  <Text style={styles.optionDesc}>
-                    Load Garmin, Coros, Suunto or smartband recordings (.GPX, .TCX, .FIT).
-                  </Text>
-                  <Text style={styles.optionMeta}>Auto-snaps to CartoDEM elevation</Text>
-                </View>
-              </TouchableOpacity>
+          ) : showGraticulePicker ? (
+            /* Sheet Graticule Selector Sub-view */
+            <ScrollView style={{ maxHeight: 360 }}>
+              <View style={styles.graticuleList}>
+                <Text style={styles.graticuleDesc}>
+                  Select an official 15' × 15' Survey of India Open Series Map sheet to georeference and overlay directly onto the live map:
+                </Text>
 
-              {/* Option 2: Toposheet */}
-              <TouchableOpacity
-                style={styles.optionCard}
-                onPress={handlePickSoiSheet}
-                activeOpacity={0.8}
-              >
-                <View style={[styles.iconBadge, { backgroundColor: '#D99B2622', borderColor: '#D99B26' }]}>
-                  <MapPin size={24} color="#D99B26" />
-                </View>
-                <View style={styles.optionContent}>
-                  <Text style={styles.optionTitle}>SURVEY OF INDIA TOPO SHEET</Text>
-                  <Text style={styles.optionDesc}>
-                    Scan official 1:50,000 sheet (.PDF, .TIF, .PNG). AI detects ridgelines & valleys.
-                  </Text>
-                  <Text style={styles.optionMeta}>Dashed violet candidate paths</Text>
-                </View>
-              </TouchableOpacity>
+                {SOI_GRATICULE_PRESETS.map((preset) => (
+                  <TouchableOpacity
+                    key={preset.sheetNumber}
+                    style={styles.graticuleItem}
+                    onPress={() => handleSelectGraticulePreset(preset)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.graticuleTop}>
+                      <View style={styles.sheetBadge}>
+                        <Layers size={12} color={FieldColors.contourOchre} />
+                        <Text style={styles.sheetBadgeText}>SHEET {preset.sheetNumber}</Text>
+                      </View>
+                      <Text style={styles.graticuleRegion}>{preset.region}</Text>
+                    </View>
+                    <Text style={styles.graticuleName}>{preset.name}</Text>
+                    <Text style={styles.graticuleCoords}>
+                      Bounds: {preset.bounds[0][0]}°N, {preset.bounds[0][1]}°E to {preset.bounds[1][0]}°N, {preset.bounds[1][1]}°E
+                    </Text>
+                  </TouchableOpacity>
+                ))}
 
-              {/* Option 3: 1-Tap Sample */}
-              <View style={styles.sampleSection}>
-                <View style={styles.sampleHeader}>
-                  <Sparkles size={16} color={FieldColors.rescueOrange} />
-                  <Text style={styles.sampleLabel}>TEST BENCH / NO FILE HANDY?</Text>
-                </View>
-                <KnurledButton
-                  label="1-TAP LOAD SAMPLE XIAOMI BAND GPX"
-                  variant="primary"
-                  size="md"
-                  icon={<Upload size={16} color="#0F1210" />}
-                  onPress={handleLoadSampleGpx}
-                />
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => setShowGraticulePicker(false)}
+                >
+                  <Text style={styles.backButtonText}>← BACK TO MAIN IMPORT</Text>
+                </TouchableOpacity>
               </View>
-            </View>
+            </ScrollView>
+          ) : (
+            <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
+              <View style={styles.body}>
+                {/* Option 1: Fitness track */}
+                <TouchableOpacity
+                  style={styles.optionCard}
+                  onPress={handlePickWorkoutTrack}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.iconBadge, { backgroundColor: '#38BDF822', borderColor: '#38BDF8' }]}>
+                    <FileText size={22} color="#38BDF8" />
+                  </View>
+                  <View style={styles.optionContent}>
+                    <Text style={styles.optionTitle}>FITNESS ACTIVITY TRACK</Text>
+                    <Text style={styles.optionDesc}>
+                      Load Garmin, Coros, Suunto or smartband recordings (.GPX, .TCX, .FIT).
+                    </Text>
+                    <Text style={styles.optionMeta}>Auto-snaps to CartoDEM elevation</Text>
+                  </View>
+                </TouchableOpacity>
+
+                {/* Option 2: Upload Real SOI Toposheet */}
+                <TouchableOpacity
+                  style={styles.optionCard}
+                  onPress={handlePickSoiSheet}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.iconBadge, { backgroundColor: '#D99B2622', borderColor: '#D99B26' }]}>
+                    <MapPin size={22} color="#D99B26" />
+                  </View>
+                  <View style={styles.optionContent}>
+                    <Text style={styles.optionTitle}>UPLOAD & OVERLAY SOI SHEET</Text>
+                    <Text style={styles.optionDesc}>
+                      Upload official 1:50k sheet (.PDF, .TIF, .PNG, .JPG). Live Leaflet raster overlay.
+                    </Text>
+                    <Text style={styles.optionMeta}>Overlays image + extracts candidate footpaths</Text>
+                  </View>
+                </TouchableOpacity>
+
+                {/* Option 3: Choose from Sheet Graticule Selector */}
+                <TouchableOpacity
+                  style={styles.optionCard}
+                  onPress={() => setShowGraticulePicker(true)}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.iconBadge, { backgroundColor: '#A855F722', borderColor: '#A855F7' }]}>
+                    <Layers size={22} color="#A855F7" />
+                  </View>
+                  <View style={styles.optionContent}>
+                    <Text style={styles.optionTitle}>SHEET GRATICULE SELECTOR</Text>
+                    <Text style={styles.optionDesc}>
+                      Choose from presets: 53J/1 Sankri, 52H/8 Hampta, 78O/11 Meghalaya, 83K/2 Dzukou.
+                    </Text>
+                    <Text style={styles.optionMeta}>Instant 15' × 15' vector/raster synthesis</Text>
+                  </View>
+                  <ChevronRight size={18} color="#888" />
+                </TouchableOpacity>
+
+                {/* Option 4: 1-Tap Sample Toposheet */}
+                <View style={styles.sampleSection}>
+                  <View style={styles.sampleHeader}>
+                    <Sparkles size={15} color={FieldColors.rescueOrange} />
+                    <Text style={styles.sampleLabel}>TEST BENCH & LIVE DEMOS</Text>
+                  </View>
+                  <View style={{ gap: 8 }}>
+                    <KnurledButton
+                      label="1-TAP LOAD SAMPLE SOI TOPOSHEET (53J/1)"
+                      variant="primary"
+                      size="sm"
+                      icon={<Eye size={15} color="#0F1210" />}
+                      onPress={handle1TapSampleSoi}
+                    />
+                    <KnurledButton
+                      label="1-TAP LOAD SAMPLE SMARTBAND GPX"
+                      variant="secondary"
+                      size="sm"
+                      icon={<Upload size={15} color={FieldColors.parchment} />}
+                      onPress={handleLoadSampleGpx}
+                    />
+                  </View>
+                </View>
+              </View>
+            </ScrollView>
           )}
 
           <View style={styles.footerNote}>
@@ -278,12 +420,12 @@ const styles = StyleSheet.create({
   },
   modalCard: {
     width: '100%',
-    maxWidth: 440,
+    maxWidth: 460,
     backgroundColor: FieldColors.obsidianBasalt,
     borderColor: FieldColors.contourOchre,
     borderWidth: 1.5,
     borderRadius: 8,
-    padding: 18,
+    padding: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.8,
@@ -295,59 +437,56 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     borderBottomWidth: 1.5,
     borderBottomColor: '#252F29',
-    paddingBottom: 12,
-    marginBottom: 16,
+    paddingBottom: 10,
+    marginBottom: 12,
   },
   title: {
     fontFamily: FieldTypography.mono,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '900',
     color: FieldColors.parchment,
     letterSpacing: 0.8,
   },
   subtitle: {
     fontFamily: FieldTypography.mono,
-    fontSize: 10,
-    fontWeight: '600',
+    fontSize: 9,
     color: FieldColors.contourOchre,
     marginTop: 2,
-    letterSpacing: 1.2,
+    letterSpacing: 1,
   },
   closeBtn: {
     padding: 4,
-    borderRadius: 4,
-    backgroundColor: FieldColors.deepPine,
-  },
-  body: {
-    gap: 14,
   },
   loadingContainer: {
-    paddingVertical: 40,
+    paddingVertical: 32,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 12,
   },
   loadingText: {
-    marginTop: 14,
     fontFamily: FieldTypography.mono,
-    fontSize: 12,
+    fontSize: 11,
     color: FieldColors.parchment,
     textAlign: 'center',
+  },
+  body: {
+    gap: 10,
   },
   optionCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: FieldColors.deepPine,
-    borderWidth: 1.5,
-    borderColor: '#2E3932',
+    backgroundColor: '#161D19',
+    borderColor: '#2A362E',
+    borderWidth: 1,
     borderRadius: 6,
-    padding: 12,
-    gap: 12,
+    padding: 10,
+    gap: 10,
   },
   iconBadge: {
-    width: 44,
-    height: 44,
+    width: 38,
+    height: 38,
     borderRadius: 6,
-    borderWidth: 1.5,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -356,34 +495,30 @@ const styles = StyleSheet.create({
   },
   optionTitle: {
     fontFamily: FieldTypography.mono,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
     color: FieldColors.parchment,
     letterSpacing: 0.5,
   },
   optionDesc: {
-    fontFamily: FieldTypography.body,
+    fontFamily: 'System',
     fontSize: 11,
-    color: '#A0AFA6',
+    color: '#A0AAB0',
     marginTop: 2,
-    lineHeight: 15,
   },
   optionMeta: {
     fontFamily: FieldTypography.mono,
     fontSize: 9,
-    fontWeight: '600',
     color: FieldColors.mossNeon,
-    marginTop: 4,
-    letterSpacing: 0.5,
+    marginTop: 3,
+    fontWeight: '600',
   },
   sampleSection: {
-    backgroundColor: '#161F1A',
-    borderWidth: 1,
-    borderColor: '#2A3A31',
-    borderRadius: 6,
-    padding: 12,
-    gap: 10,
     marginTop: 4,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#252F29',
+    gap: 8,
   },
   sampleHeader: {
     flexDirection: 'row',
@@ -395,19 +530,87 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
     color: FieldColors.rescueOrange,
-    letterSpacing: 0.8,
+    letterSpacing: 1,
   },
   footerNote: {
-    marginTop: 16,
+    marginTop: 12,
+    paddingTop: 8,
     borderTopWidth: 1,
-    borderTopColor: '#202A24',
-    paddingTop: 10,
+    borderTopColor: '#252F29',
   },
   footerText: {
     fontFamily: FieldTypography.mono,
-    fontSize: 8.5,
-    color: '#65736C',
+    fontSize: 8,
+    color: '#607267',
     textAlign: 'center',
-    letterSpacing: 0.6,
+    letterSpacing: 0.5,
+  },
+  graticuleList: {
+    gap: 8,
+    paddingVertical: 4,
+  },
+  graticuleDesc: {
+    fontFamily: 'System',
+    fontSize: 11,
+    color: '#A0AAB0',
+    marginBottom: 6,
+  },
+  graticuleItem: {
+    backgroundColor: '#161D19',
+    borderColor: '#2A362E',
+    borderWidth: 1,
+    borderRadius: 6,
+    padding: 10,
+    gap: 4,
+  },
+  graticuleTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  sheetBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#2D1B0A',
+    borderColor: FieldColors.contourOchre,
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  sheetBadgeText: {
+    fontFamily: FieldTypography.mono,
+    fontSize: 10,
+    fontWeight: '800',
+    color: FieldColors.contourOchre,
+  },
+  graticuleRegion: {
+    fontFamily: FieldTypography.mono,
+    fontSize: 9,
+    color: '#888',
+  },
+  graticuleName: {
+    fontFamily: FieldTypography.mono,
+    fontSize: 12,
+    fontWeight: '800',
+    color: FieldColors.parchment,
+    marginTop: 2,
+  },
+  graticuleCoords: {
+    fontFamily: FieldTypography.mono,
+    fontSize: 9,
+    color: FieldColors.glacierCyan,
+  },
+  backButton: {
+    alignItems: 'center',
+    paddingVertical: 8,
+    marginTop: 6,
+  },
+  backButtonText: {
+    fontFamily: FieldTypography.mono,
+    fontSize: 10,
+    fontWeight: '800',
+    color: FieldColors.contourOchre,
   },
 });

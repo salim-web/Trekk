@@ -11,7 +11,7 @@ export interface ParsedTrackpoint {
 export interface ParsedTrack {
   id?: string;
   name: string;
-  sourceFormat: 'gpx' | 'tcx' | 'fit';
+  sourceFormat: 'gpx' | 'tcx' | 'fit' | 'soi';
   points: ParsedTrackpoint[];
   distanceKm: number;
   elevationGainM: number;

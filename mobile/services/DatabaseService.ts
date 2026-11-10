@@ -1,9 +1,40 @@
 import * as SQLite from 'expo-sqlite';
 import { ParsedTrack } from './TrackParser';
 
+export interface SquadMessageRecord {
+  id: string;
+  senderName: string;
+  senderRole?: string;
+  text: string;
+  timestamp: string;
+  type: 'text' | 'gps' | 'alert' | 'sos' | 'media_notice';
+  lat?: number;
+  lon?: number;
+  ele?: number;
+  hops: number;
+  rssiDbm?: number;
+}
+
+export interface SquadMediaRecord {
+  id: string;
+  name: string;
+  type: 'photo' | 'gpx' | 'voice' | 'doc';
+  sizeBytes: number;
+  sha256: string;
+  senderName: string;
+  timestamp: string;
+  lat: number;
+  lon: number;
+  ele: number;
+  localUri?: string;
+  isSynced: boolean;
+}
+
 export class DatabaseService {
   private static db: SQLite.SQLiteDatabase | null = null;
   private static memoryTracks: ParsedTrack[] = [];
+  private static memoryMessages: SquadMessageRecord[] = [];
+  private static memoryMedia: SquadMediaRecord[] = [];
 
   static async getDb(): Promise<SQLite.SQLiteDatabase | null> {
     if (this.db) return this.db;
@@ -32,9 +63,39 @@ export class DatabaseService {
         pointsJson TEXT NOT NULL,
         isSynced INTEGER NOT NULL DEFAULT 0
       );
+
+      CREATE TABLE IF NOT EXISTS SquadMessages (
+        id TEXT PRIMARY KEY,
+        senderName TEXT NOT NULL,
+        senderRole TEXT,
+        text TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        type TEXT NOT NULL,
+        lat REAL,
+        lon REAL,
+        ele REAL,
+        hops INTEGER NOT NULL DEFAULT 1,
+        rssiDbm INTEGER DEFAULT -65
+      );
+
+      CREATE TABLE IF NOT EXISTS SquadSharedMedia (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        sizeBytes INTEGER NOT NULL,
+        sha256 TEXT NOT NULL,
+        senderName TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        lat REAL NOT NULL,
+        lon REAL NOT NULL,
+        ele REAL NOT NULL,
+        localUri TEXT,
+        isSynced INTEGER NOT NULL DEFAULT 0
+      );
     `);
   }
 
+  // --- TRAILS ---
   static async saveImportedTrack(track: ParsedTrack): Promise<ParsedTrack> {
     const db = await this.getDb();
     const idStr = `imported_${Date.now()}`;
@@ -118,5 +179,114 @@ export class DatabaseService {
 
   static async deleteTrack(id: string): Promise<void> {
     return this.deleteImportedTrack(id);
+  }
+
+  // --- SQUAD MESSAGES ---
+  static async saveSquadMessage(msg: SquadMessageRecord): Promise<void> {
+    const db = await this.getDb();
+    if (!db) {
+      this.memoryMessages.unshift(msg);
+      return;
+    }
+    try {
+      await db.runAsync(
+        `INSERT OR REPLACE INTO SquadMessages 
+         (id, senderName, senderRole, text, timestamp, type, lat, lon, ele, hops, rssiDbm)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          msg.id,
+          msg.senderName,
+          msg.senderRole ?? '',
+          msg.text,
+          msg.timestamp,
+          msg.type,
+          msg.lat ?? null,
+          msg.lon ?? null,
+          msg.ele ?? null,
+          msg.hops,
+          msg.rssiDbm ?? -65,
+        ]
+      );
+    } catch (e) {
+      console.error('Error saving squad message:', e);
+      this.memoryMessages.unshift(msg);
+    }
+  }
+
+  static async getSquadMessages(): Promise<SquadMessageRecord[]> {
+    const db = await this.getDb();
+    if (!db) return [...this.memoryMessages];
+    try {
+      return await db.getAllAsync<SquadMessageRecord>('SELECT * FROM SquadMessages ORDER BY timestamp ASC');
+    } catch (e) {
+      console.error('Error fetching squad messages:', e);
+      return [...this.memoryMessages];
+    }
+  }
+
+  // --- SQUAD SHARED MEDIA ---
+  static async saveSquadMedia(media: SquadMediaRecord): Promise<void> {
+    const db = await this.getDb();
+    if (!db) {
+      const idx = this.memoryMedia.findIndex((m) => m.id === media.id);
+      if (idx >= 0) this.memoryMedia[idx] = media;
+      else this.memoryMedia.push(media);
+      return;
+    }
+    try {
+      await db.runAsync(
+        `INSERT OR REPLACE INTO SquadSharedMedia
+         (id, name, type, sizeBytes, sha256, senderName, timestamp, lat, lon, ele, localUri, isSynced)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          media.id,
+          media.name,
+          media.type,
+          media.sizeBytes,
+          media.sha256,
+          media.senderName,
+          media.timestamp,
+          media.lat,
+          media.lon,
+          media.ele,
+          media.localUri ?? null,
+          media.isSynced ? 1 : 0,
+        ]
+      );
+    } catch (e) {
+      console.error('Error saving squad media:', e);
+      const idx = this.memoryMedia.findIndex((m) => m.id === media.id);
+      if (idx >= 0) this.memoryMedia[idx] = media;
+      else this.memoryMedia.push(media);
+    }
+  }
+
+  static async getSquadMedia(): Promise<SquadMediaRecord[]> {
+    const db = await this.getDb();
+    if (!db) return [...this.memoryMedia];
+    try {
+      const rows = await db.getAllAsync<any>('SELECT * FROM SquadSharedMedia ORDER BY timestamp DESC');
+      return rows.map((r) => ({
+        ...r,
+        isSynced: !!r.isSynced,
+      }));
+    } catch (e) {
+      console.error('Error fetching squad media:', e);
+      return [...this.memoryMedia];
+    }
+  }
+
+  static async markMediaSynced(id: string): Promise<void> {
+    const db = await this.getDb();
+    const item = this.memoryMedia.find((m) => m.id === id);
+    if (item) item.isSynced = true;
+
+    if (db) {
+      try {
+        await db.runAsync('UPDATE SquadSharedMedia SET isSynced = 1 WHERE id = ?', [id]);
+      } catch (e) {
+        console.error('Error updating media synced status:', e);
+      }
+    }
   }
 }
