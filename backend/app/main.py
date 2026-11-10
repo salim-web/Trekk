@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.geo.routes import router as geo_router
 from app.party.routes import router as party_router
+from app.strava.routes import router as strava_router
 
 logging.basicConfig(
     level=logging.INFO if not settings.DEBUG else logging.DEBUG,
@@ -33,6 +34,7 @@ app.add_middleware(
 # Register route prefixes
 app.include_router(geo_router, prefix=settings.API_V1_PREFIX)
 app.include_router(party_router, prefix=settings.API_V1_PREFIX)
+app.include_router(strava_router, prefix=settings.API_V1_PREFIX)
 
 
 @app.get("/health", tags=["System"])

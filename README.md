@@ -3,7 +3,8 @@
 
 [![Python](https://img.shields.io/badge/Python-3.11+-171D19?style=for-the-badge&logo=python&logoColor=4ADE80)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111+-171D19?style=for-the-badge&logo=fastapi&logoColor=38BDF8)](https://fastapi.tiangolo.com)
-[![Flutter](https://img.shields.io/badge/Flutter-3.22+-171D19?style=for-the-badge&logo=flutter&logoColor=FF5500)](https://flutter.dev)
+[![React Native](https://img.shields.io/badge/React_Native-Expo_SDK_52+-171D19?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactnative.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.3+-171D19?style=for-the-badge&logo=typescript&logoColor=3178C6)](https://typescriptlang.org)
 [![PostGIS](https://img.shields.io/badge/PostGIS-3.4+-171D19?style=for-the-badge&logo=postgresql&logoColor=D99B26)](https://postgis.net)
 [![GDAL](https://img.shields.io/badge/GDAL-3.8+-171D19?style=for-the-badge&logo=osgeo&logoColor=F4EFE6)](https://gdal.org)
 
@@ -59,39 +60,36 @@ trekindia/
 │   │   └── test_party.py
 │   ├── Dockerfile
 │   └── requirements.txt
-└── mobile/                        # Flutter High-Performance Mobile Client
-    ├── pubspec.yaml
-    ├── lib/
-    │   ├── main.dart              # Entrypoint, orientation lock, theme bootstrapping
-    │   ├── theme/
-    │   │   ├── field_tokens.dart  # Bespoke color palette, typography & tactile dimensions
-    │   │   └── app_theme.dart     # Dark basalt theme definition, graticule decorations
-    │   ├── widgets/
-    │   │   └── field_instruments/
-    │   │       ├── vernier_opacity_dial.dart      # CustomPainter knurled thumb-wheel with haptics
-    │   │       ├── elevation_scrubbing_graph.dart # Spline area graph with altitude polaroids
-    │   │       ├── campfire_mesh_radar.dart       # Sonar radar with RSSI nodes & audio cassette
-    │   │       ├── soi_grid_stamp_card.dart       # Vintage SOI index card with graticule ticks
-    │   │       └── knurled_hardware_button.dart   # Tactile hardware push-button / rocker switch
-    │   ├── map/
-    │   │   ├── map_screen.dart    # MapLibre 2D/3D vector contours + SOI raster overlay
-    │   │   └── offline_tile_cache.dart # Offline vector & raster tile manager
-    │   ├── tracker/
-    │   │   ├── unified_collector.dart # Phone GNSS + BLE Heart Rate GATT (0x180D/0x2A37)
-    │   │   ├── health_bridge.dart     # Health Connect / HealthKit ExerciseRoute reconstructor
-    │   │   ├── gpx_compiler.dart      # GPX 1.1 serializer with Garmin gpxtpx:TrackPointExtension
-    │   │   └── strava_uploader.dart   # Resilient Strava API v3 multipart uploader
-    │   ├── p2p/
-    │   │   ├── ble_mesh_protocol.dart # 31-byte binary packet, LRU cache, jitter relay
-    │   │   └── camp_sync_server.dart  # Embedded Shelf HTTP/WS server (port 8080) & QR badge
-    │   ├── party/
-    │   │   ├── party_manager.dart     # Party state machine, EXIF spatial pin, local queue
-    │   │   └── tus_uploader_client.dart # Resumable chunked upload client
-    │   └── screens/
-    │       ├── dashboard_screen.dart  # Instrument dashboard with altimeter & SOS
-    │       └── radar_screen.dart      # Campfire mesh radar & voice memo recorder
+└── mobile/                        # React Native + Expo SDK 52+ (TypeScript)
+    ├── package.json
+    ├── app.json
+    ├── tsconfig.json
+    ├── app/                       # Expo Router File-Based Navigation
+    │   ├── _layout.tsx            # Root layout & dark basalt field theme
+    │   ├── (tabs)/                # 4-Tab Field Instrument Navigation
+    │   │   ├── _layout.tsx        # Bottom tactile tab bar
+    │   │   ├── index.tsx          # Explore: OpenTopoMap + Native Trail Plotting
+    │   │   ├── record.tsx         # Record: GNSS + BLE HR + Slide-to-SOS
+    │   │   ├── squads.tsx         # Squads: P2P Mesh Radar & Camp Sync Hotspot
+    │   │   └── saved.tsx          # Saved: Strava Connect, Map Repair & Imported Files
+    │   └── trail-detail.tsx       # Trail Inspection Modal with Elevation Profile
+    ├── components/                # Tactile Himalayan Field Instrument UI Kit
+    │   ├── TopoMapView.tsx        # Full-Screen OpenTopoMap with Native Polylines
+    │   ├── ElevationChart.tsx     # Interactive SVG Elevation Profile Scrubbing Chart
+    │   ├── FileImportModal.tsx    # DocumentPicker (*/*) + GPX/TCX/FIT Sniffer
+    │   ├── StravaConnectModal.tsx # OAuth2 WebBrowser / Demo Sandbox Sync Modal
+    │   ├── SoiScanOverlay.tsx     # SOI Toposheet Analyzer & AI Ridgeline Overlay
+    │   ├── CampfireRadar.tsx      # Topographic Sonar Radar with Signal Nodes
+    │   └── KnurledButton.tsx      # Tactile Mechanical Push-Button
+    ├── services/                  # Business Logic & Native Bridges
+    │   ├── TrackParser.ts         # Fast-XML GPX/TCX + Binary FIT Parser
+    │   ├── StravaService.ts       # OAuth2 Flow, Activity Auditor & GPX 1.1 Upload
+    │   ├── DatabaseService.ts     # Expo-SQLite Offline Storage
+    │   └── SoiAnalysisService.ts  # AI Ridgeline & Valley Trail Detection
+    ├── constants/
+    │   ├── FieldTokens.ts         # High-Sunlight & Basalt OLED Tokens
+    │   └── SeededTrails.ts        # 10 Iconic Seeded Indian Himalayan & Ghats Treks
     └── assets/
-        ├── fonts/
         └── topo/
 ```
 
@@ -172,19 +170,15 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 Interactive API documentation will be accessible at: `http://localhost:8000/docs`.
 
-### 4.3 Mobile Client Setup (Flutter)
+### 4.3 Mobile Client Setup (React Native + Expo SDK 52+)
 ```bash
 cd mobile
 
-# Install Flutter dependencies
-flutter pub get
+# Install dependencies
+npm install
 
-# Platform-specific permissions:
-# - Android: android.permission.ACCESS_FINE_LOCATION, BLUETOOTH_SCAN, BLUETOOTH_ADVERTISE, CHANGE_WIFI_MULTICAST_STATE
-# - iOS: NSBluetoothAlwaysUsageDescription, NSLocationAlwaysAndWhenInUseUsageDescription
-
-# Run on Physical Device (recommended for BLE Mesh and Shelf Hotspot testing)
-flutter run -d <device_id>
+# Start Expo development server (scan QR in Expo Go on Android or iOS)
+npx expo start
 ```
 
 ---

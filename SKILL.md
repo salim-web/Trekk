@@ -163,3 +163,25 @@ When a photo is taken offline, high-altitude cold may cause the camera sensor to
    $$\text{lon}_{\text{photo}} = \text{lon}_A + \alpha (\text{lon}_B - \text{lon}_A)$$
    $$\text{ele}_{\text{photo}} = \text{ele}_A + \alpha (\text{ele}_B - \text{ele}_A)$$
 5. Pin the photo polaroid marker at $(\text{lat}_{\text{photo}}, \text{lon}_{\text{photo}}, \text{ele}_{\text{photo}})$ on both the 3D map and the interactive elevation scrubbing graph.
+
+---
+
+## 7. Multi-Format Fitness File Ingestion & Android MIME Invariants
+- **Android OS DocumentPicker Rule**: Never pass extension strings (e.g. `['.gpx', '.fit', '.tcx']`) into `DocumentPicker.getDocumentAsync({ type })`. Android's Storage Access Framework (SAF) does not have standardized IANA MIME types for GPX, TCX, or FIT, and will crash immediately with `Unsupported filter: .gpx`.
+- **Invariant**: Always invoke document pickers with wildcard MIME `type: '*/*'`, verify `asset.name.toLowerCase().endsWith(...)` in application logic, and gracefully notify the user if an invalid format is selected.
+- **Semicircles Coordinate Invariant**: Garmin FIT binary files store coordinates as 32-bit signed integers in semicircles. Convert to standard WGS84 decimal degrees using:
+  $$\text{degrees} = \text{semicircles} \times \left(\frac{180.0}{2^{31}}\right) = \text{semicircles} \times \left(\frac{180.0}{2147483648}\right)$$
+
+---
+
+## 8. Expo SDK 54 FileSystem & Encoding Invariants
+- **Breaking Change in Expo SDK 54**: `expo-file-system` removed the legacy enum `FileSystem.EncodingType`. Calling `FileSystem.EncodingType.UTF8` or `FileSystem.EncodingType.Base64` evaluates to `undefined`, which throws `Cannot read property 'UTF8' of undefined`.
+- **Mandatory Legacy Subpath**: Import from `'expo-file-system/legacy'` rather than `'expo-file-system'`:
+  ```ts
+  import * as FileSystem from 'expo-file-system/legacy';
+  ```
+- **Strict String-Literal Encoding Invariant**: Always pass lowercase string literals for encoding options:
+  - Text files (.gpx, .tcx, .json): `{ encoding: 'utf8' }`
+  - Binary files (.fit, images): `{ encoding: 'base64' }`
+- **In-Memory Sample Bypass**: Sample generators must parse directly from in-memory string constants rather than writing to disk and reading back, guaranteeing test benches never fail due to mobile filesystem I/O constraints.
+

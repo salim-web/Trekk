@@ -5,6 +5,13 @@
 .flutter-plugins
 .flutter-plugins-dependencies
 build/
+mobile_flutter_backup/
+
+# Node & Expo
+node_modules/
+.expo/
+.expo-shared/
+expo-env.d.ts
 
 # Android build outputs & local config
 mobile/android/.gradle/

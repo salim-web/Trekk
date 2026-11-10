@@ -1,7 +1,7 @@
 # TrekIndia System Context & Architecture Record 🧭
 
-*Document Version*: `1.0.0-PROD`  
-*Target Environments*: Mobile (Flutter 3.22+ iOS/Android) & Backend (Python 3.11+ FastAPI / PostGIS / GDAL)  
+*Document Version*: `2.0.0-EXPO`  
+*Target Environments*: Mobile (React Native Expo SDK 52+ TypeScript / iOS & Android) & Backend (Python 3.11+ FastAPI / PostGIS / GDAL)  
 *Architectural Objective*: Offline-First Himalayan Navigation & Tactile Instrument Monorepo.
 
 ---
@@ -9,14 +9,13 @@
 ## 1. System State & Architectural Decisions (ADR)
 
 ### ADR-001: Offline-First Hybrid Topographical Rendering
-- **Decision**: Combine MapLibre GL native vector contours (MVT, zoom 8-16) with georeferenced Survey of India (SOI) 1:50,000 raster layers (`EPSG:3857` MBTiles/XYZ) rendered over custom tile layers.
-- **Rationale**: Vector tiles provide crisp 60fps rotation, 3D terrain pitch, and dynamic hillshading. SOI vintage sheets supply historical bridle paths, natural perennial springs, and Survey benchmarks that modern OSM data often omits in high-altitude Ladakh and Himachal Pradesh.
-- **Implementation**: The custom `VernierOpacityDial` hardware-slider widget directly manipulates the raster layer opacity in real-time between 0.0 (Pure Modern Vector) and 1.0 (Full Vintage SOI Topo Sheet).
+- **Decision**: Render interactive topographical contours via Leaflet / OpenTopoMap (`https://tile.opentopomap.org/{z}/{x}/{y}.png`) inside native WebView/Map components, overlaying georeferenced Survey of India (SOI) 1:50,000 raster sheets.
+- **Rationale**: Immediate execution on Android & iOS without native compilation barriers; seamless 60fps gesture response and offline caching.
 
 ### ADR-002: Dual-Tier Physical Mesh Architecture
 - **Decision**: Reject reliance on internet or cellular SMS gateways in backcountry. Implement a 2-Tier mesh:
   - **Tier 1 (Trail-in-Motion)**: Raw BLE non-connectable advertisements carrying a tightly packed 31-byte binary packet with 4-hop multi-hop flood-fill relay and duty-cycled radio (1.5s active / 8s sleep).
-  - **Tier 2 (Basecamp / Tent Sync)**: Embedded HTTP/WebSocket `shelf` server run on the party leader's device over local Android/iOS Wi-Fi hotspot, allowing 20-40 MB/s bulk delta sync of media and voice notes.
+  - **Tier 2 (Basecamp / Tent Sync)**: Embedded HTTP/WebSocket server run on the party leader's device over local Wi-Fi hotspot, allowing 20-40 MB/s bulk delta sync of media and voice notes.
 - **Rationale**: BLE provides continuous low-energy pinging (~100m range, 0.5% battery/hr), while ad-hoc Wi-Fi enables bulk media transfer without cloud infrastructure.
 
 ### ADR-003: CartoDEM Snapping & Velocity Clamping
@@ -27,6 +26,11 @@
 - **Decision**: Complete ban on Material 3 tinted purple/blue cards, floating action buttons with standard shadows, and generic web layouts.
 - **Aesthetic**: Teenage Engineering physical hardware + Garmin Marq + Vintage Survey of India 1960s Topo Cartography.
 - **Tokens**: Deep Pine (`#171D19`) & Obsidian Basalt (`#0F1210`), SOI Parchment (`#F4EFE6`), Rescue Orange (`#FF5500`), Contour Ochre (`#D99B26`), Glacier Cyan (`#38BDF8`), Moss Neon (`#4ADE80`).
+
+### ADR-005: React Native (Expo SDK 52+) Architecture Migration & Multi-Format Ingestion
+- **Decision**: Migrate `/mobile` to React Native Expo (TypeScript / Expo Router). Use `expo-document-picker` with `type: '*/*'` to eliminate Android's OS-level `Unsupported filter` crash when picking fitness files (`.gpx`, `.tcx`, `.fit`).
+- **Rationale**: Android system intent filters reject non-standard MIME types for fitness formats unless queried broadly as `*/*`. Subsequent validation and byte decoding are performed in TypeScript using `fast-xml-parser` and binary FIT decoding.
+- **Strava Flow**: Implements `expo-auth-session` / `expo-web-browser` with an intelligent Interactive OAuth2 Simulator fallback so development and sandbox testing never stall even without client secrets.
 
 ---
 
@@ -136,12 +140,12 @@ CREATE TABLE party_media (
 CREATE INDEX idx_party_media_location ON party_media USING GIST (location);
 ```
 
-### 3.2 Mobile Local Offline Database (Drift / SQLite)
-Local SQLite tables mirrored in `mobile/lib/db`:
-- `LocalTracks`: `id`, `name`, `startedAt`, `endedAt`, `gpxBlob`, `isSynced`
-- `LocalTrackPoints`: `id`, `trackId`, `latitude`, `longitude`, `elevationM`, `heartRate`, `timestamp`
-- `LocalPartyMedia`: `id`, `partyId`, `localFilePath`, `sha256Hash`, `capturedAt`, `lat`, `lon`, `ele`, `isUploaded`
-- `LocalMeshMessages`: `msgId`, `partyHash`, `msgType`, `senderShortId`, `payloadHex`, `receivedAt`, `hopCount`
+### 3.2 Mobile Local Offline Database (expo-sqlite)
+Local SQLite tables managed in `mobile/services/DatabaseService.ts` using `expo-sqlite`:
+- `UserImportedTrails`: `id`, `name`, `sourceFormat`, `importedAt`, `distanceKm`, `elevationGainM`, `maxAltitudeM`, `minAltitudeM`, `averageHeartRate`, `pointsJson`, `isSynced`
+- `LocalTracks`: Mirrored in `expo-sqlite` and in-memory fallback for offline recording.
+- Credentials & Tokens: Persisted via `expo-secure-store` (`strava_access_token`, `strava_athlete_name`, `strava_client_id`, `strava_client_secret`).
+- File & Asset I/O: Managed via `expo-file-system/legacy` with string-literal encodings (`utf8`, `base64`).
 
 ---
 
@@ -230,9 +234,12 @@ Local SQLite tables mirrored in `mobile/lib/db`:
 - [x] Step 4: Backend automated SOI PDF georeferencing pipeline (GDAL GCPs + Warp + MBTiles).
 - [x] Step 5: Backend OSM Overpass Harvester & PostGIS trail loader.
 - [x] Step 6: Backend Trek Party state machine, EXIF spatial pin, TUS storage, expedition poster generator.
-- [x] Step 7: Flutter theme & design tokens (`field_tokens.dart`, `app_theme.dart`).
-- [x] Step 8: Full UI/UX Consumer Overhaul (Explore, Record, Squads, Saved & Sync).
-- [x] Step 9: 10 Seeded Iconic Indian Treks Dataset (Kedarkantha, Hampta, Dzukou, Sandakphu, Valley of Flowers, Kashmir Great Lakes, Rajmachi, Kalsubai, Kumara Parvatha, David Scott).
-- [x] Step 10: Real Topographical Maps with OpenTopoMap contours, Esri Satellite, OpenStreetMap, and SOI overlay.
+- [x] Step 7: Tactile Field-Instrument design tokens (`mobile/constants/FieldTokens.ts`).
+- [x] Step 8: Full UI/UX Consumer Overhaul in React Native Expo SDK 54 (Explore, Record, Squads, Saved & Sync).
+- [x] Step 9: 10 Seeded Iconic Indian Treks Dataset with verified dense WGS-84 coordinates (Kedarkantha, Hampta, Dzukou, Sandakphu, Valley of Flowers, Kashmir Great Lakes, Rajmachi, Kalsubai, Kumara Parvatha, David Scott).
+- [x] Step 10: Real Topographical Maps with OpenTopoMap contours, Esri Satellite, OpenStreetMap, and SOI overlay via Leaflet WebView.
 - [x] Step 11: Slide-to-Trigger Emergency SOS Control with 4-hop physical BLE Mesh.
-- [x] Step 12: Flutter Camp Sync Shelf HTTP/WS server (port 8080) + QR badge generator + SHA-256 delta sync.
+- [x] Step 12: Offline Camp Sync P2P server state machine + QR badge share.
+- [x] Feature Update 1: Native on-map trail plotting with interactive markers, glowing selected state, camera bounds animation, and minimal dismissible inspection pill (bottom cards completely removed).
+- [x] Feature Update 2: Multi-format track parser (.GPX 1.1 with Garmin HR extension, .TCX with HeartRateBpm, binary .FIT with semicircles conversion) with `expo-document-picker` (`type: '*/*'`), `expo-file-system/legacy` literal encodings, and local SQLite persistence via `expo-sqlite`.
+- [x] Feature Update 3: Strava Integration with official OAuth2 `localhost` callback domain, `expo-secure-store` credentials persistence, athlete activities auditor, "Missing Map" detection & CartoDEM repair action with GPX 1.1 sharing via `expo-sharing`.
