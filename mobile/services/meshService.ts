@@ -1,5 +1,4 @@
-import * as Crypto from 'expo-crypto';
-import { DatabaseService, SquadMessageRecord, SquadMediaRecord } from './DatabaseService';
+import type { SquadMessageRecord, SquadMediaRecord } from './DatabaseService';
 
 export enum MeshMsgType {
   TEXT_CHUNK = 0x01,
@@ -277,10 +276,18 @@ export class MeshService {
   }
 
   /**
-   * Computes a real SHA-256 hash using expo-crypto.
+   * Computes a real SHA-256 hash using standard Web Crypto or expo-crypto.
    */
   static async computeSha256(contentOrBase64: string): Promise<string> {
     try {
+      if (typeof globalThis !== 'undefined' && globalThis.crypto?.subtle) {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(contentOrBase64);
+        const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+      }
+      const Crypto = await import('expo-crypto');
       return await Crypto.digestStringAsync(
         Crypto.CryptoDigestAlgorithm.SHA256,
         contentOrBase64

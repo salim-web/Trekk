@@ -95,9 +95,18 @@ async def pin_spatial_media(party_id: uuid.UUID, media_in: SpatialPhotoPinReques
     if party_id not in PARTIES_DB:
         raise HTTPException(status_code=404, detail="Trek party not found")
 
-    status = PARTIES_DB[party_id]["status"]
+    party = PARTIES_DB[party_id]
+    new_status, changed = PartyLifecycleManager.evaluate_state(
+        current_status=party["status"],
+        starts_at=party["starts_at"],
+        ends_at=party["ends_at"],
+    )
+    if changed:
+        party["status"] = new_status
+
+    status = party["status"]
     if not PartyLifecycleManager.allows_media_upload(status):
-        raise HTTPException(status_code=400, detail="Party media queue is frozen (archived)")
+        raise HTTPException(status_code=400, detail=f"Party media upload not allowed in '{status}' status")
 
     media_id = uuid.uuid4()
     record = {

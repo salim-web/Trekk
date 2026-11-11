@@ -8,6 +8,9 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import {
   Bookmark,
   Activity,
@@ -22,6 +25,8 @@ import {
   Zap,
   LogOut,
   ShieldCheck,
+  MapPin,
+  Download,
 } from 'lucide-react-native';
 import { FieldColors, FieldTypography } from '../../constants/FieldTokens';
 import { DatabaseService } from '../../services/DatabaseService';
@@ -31,6 +36,7 @@ import { StravaConnectModal } from '../../components/StravaConnectModal';
 import { KnurledButton } from '../../components/KnurledButton';
 
 export default function SavedScreen() {
+  const router = useRouter();
   const [tracks, setTracks] = useState<ParsedTrack[]>([]);
   const [stravaToken, setStravaToken] = useState<string | null>(null);
   const [athleteName, setAthleteName] = useState<string | null>(null);
@@ -51,6 +57,69 @@ export default function SavedScreen() {
     setStravaToken(token);
     setAthleteName(athlete);
     setLoading(false);
+  };
+
+  const handleViewOnMap = (track: ParsedTrack) => {
+    router.push({
+      pathname: '/(tabs)/',
+      params: { focusTrackId: track.id, trackName: track.name },
+    });
+  };
+
+  const handleExportGpx = async (track: ParsedTrack) => {
+    try {
+      const gpxLines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<gpx version="1.1" creator="TrekIndia Tactical Field-Instrument"',
+        '  xmlns="http://www.topografix.com/GPX/1/1"',
+        '  xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">',
+        '  <metadata>',
+        `    <name>${track.name}</name>`,
+        '  </metadata>',
+        '  <trk>',
+        `    <name>${track.name}</name>`,
+        '    <type>hiking</type>',
+        '    <trkseg>',
+      ];
+
+      for (const pt of track.points) {
+        gpxLines.push(`      <trkpt lat="${pt.latitude.toFixed(6)}" lon="${pt.longitude.toFixed(6)}">`);
+        gpxLines.push(`        <ele>${pt.elevation.toFixed(1)}</ele>`);
+        if (pt.timestamp) gpxLines.push(`        <time>${pt.timestamp}</time>`);
+        if (pt.heartRate) {
+          gpxLines.push('        <extensions>');
+          gpxLines.push('          <gpxtpx:TrackPointExtension>');
+          gpxLines.push(`            <gpxtpx:hr>${pt.heartRate}</gpxtpx:hr>`);
+          gpxLines.push('          </gpxtpx:TrackPointExtension>');
+          gpxLines.push('        </extensions>');
+        }
+        gpxLines.push('      </trkpt>');
+      }
+
+      gpxLines.push('    </trkseg>');
+      gpxLines.push('  </trk>');
+      gpxLines.push('</gpx>');
+
+      const gpxString = gpxLines.join('\n');
+      const safeName = (track.name || 'trail').replace(/[^a-zA-Z0-9]/g, '_');
+      const targetPath = `${FileSystem.cacheDirectory || ''}TrekIndia_${safeName}.gpx`;
+
+      await FileSystem.writeAsStringAsync(targetPath, gpxString, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(targetPath, {
+          mimeType: 'application/gpx+xml',
+          dialogTitle: `Share GPX Trail: ${track.name}`,
+          UTI: 'com.topografix.gpx',
+        });
+      } else {
+        Alert.alert('GPX Exported', `Saved to ${targetPath}`);
+      }
+    } catch (err: any) {
+      Alert.alert('Export Error', err?.message || 'Could not export GPX file');
+    }
   };
 
   const handleDeleteTrack = async (id?: string) => {
@@ -236,6 +305,27 @@ export default function SavedScreen() {
                       </Text>
                     </View>
                   ) : null}
+                </View>
+
+                {/* Actions: View on Topo Map & Share GPX */}
+                <View style={styles.trackActionsRow}>
+                  <TouchableOpacity
+                    style={styles.viewOnMapBtn}
+                    onPress={() => handleViewOnMap(track)}
+                    activeOpacity={0.8}
+                  >
+                    <MapPin size={13} color="#0F1210" />
+                    <Text style={styles.viewOnMapText}>VIEW ON TOPO MAP</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.exportGpxBtn}
+                    onPress={() => handleExportGpx(track)}
+                    activeOpacity={0.8}
+                  >
+                    <Share2 size={13} color={FieldColors.contourOchre} />
+                    <Text style={styles.exportGpxText}>SHARE GPX</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
             ))}
@@ -562,6 +652,49 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: FieldColors.parchment,
     marginTop: 1,
+  },
+  trackActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+  },
+  viewOnMapBtn: {
+    flex: 1.2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: FieldColors.glacierCyan,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: 4,
+  },
+  viewOnMapText: {
+    fontFamily: FieldTypography.mono,
+    fontSize: 9.5,
+    fontWeight: '900',
+    color: '#0F1210',
+    letterSpacing: 0.5,
+  },
+  exportGpxBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#1E2822',
+    borderWidth: 1,
+    borderColor: '#35473C',
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: 4,
+  },
+  exportGpxText: {
+    fontFamily: FieldTypography.mono,
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: FieldColors.contourOchre,
+    letterSpacing: 0.5,
   },
   cacheCard: {
     backgroundColor: '#131A15',

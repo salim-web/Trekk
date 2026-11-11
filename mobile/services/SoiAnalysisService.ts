@@ -28,7 +28,8 @@ export interface SoiAnalysisResult {
 }
 
 export class SoiAnalysisService {
-  private static readonly BACKEND_URL = 'http://localhost:8000';
+  private static readonly BACKEND_URL =
+    process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
   /**
    * Analyzes an SOI sheet for topographical ridgelines and candidate trails.
@@ -40,6 +41,9 @@ export class SoiAnalysisService {
     const safeName = sheetNumber.replace(/[^a-zA-Z0-9]/g, '_');
 
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+
       const formData = new FormData();
       formData.append('sheet_number', sheetNumber);
       if (fileName) {
@@ -53,7 +57,9 @@ export class SoiAnalysisService {
       const res = await fetch(`${this.BACKEND_URL}/api/v1/geo/analyze-soi-sheet`, {
         method: 'POST',
         body: formData,
+        signal: controller.signal,
       });
+      clearTimeout(timeoutId);
 
       if (res.ok) {
         const data = await res.json();

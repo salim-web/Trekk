@@ -15,6 +15,7 @@ export interface TopoMapViewHandle {
 interface TopoMapViewProps {
   trails: TrailModel[];
   selectedTrail?: TrailModel | null;
+  baseLayer?: 'topo' | 'satellite' | 'dark' | 'osm';
   soiCandidateTrails?: SoiCandidateTrail[];
   soiOverlayData?: SoiExtractionResult | null;
   soiOpacity?: number;
@@ -34,6 +35,7 @@ interface TopoMapViewProps {
 export const TopoMapView = forwardRef<TopoMapViewHandle, TopoMapViewProps>(({
   trails,
   selectedTrail,
+  baseLayer = 'topo',
   soiCandidateTrails = [],
   soiOverlayData = null,
   soiOpacity = 0.72,
@@ -112,14 +114,39 @@ export const TopoMapView = forwardRef<TopoMapViewHandle, TopoMapViewProps>(({
 <body>
   <div id="map"></div>
   <script>
-    // Initialize map centered broadly on India (NOT locked to Kedarkantha)
+    // Initialize map centered broadly on India
     var map = L.map('map', { zoomControl: false }).setView([22.5, 79.5], 5);
 
-    // OpenTopoMap high-contrast contour tile layer
-    L.tileLayer('https://tile.opentopomap.org/{z}/{x}/{y}.png', {
-      maxZoom: 17,
-      attribution: 'Map data: &copy; OpenStreetMap, SRTM | Map style: &copy; OpenTopoMap'
-    }).addTo(map);
+    // Multi-source Base Tile Layers (Topo, Esri Satellite, CartoDB Dark, OpenStreetMap)
+    var baseLayers = {
+      topo: L.tileLayer('https://tile.opentopomap.org/{z}/{x}/{y}.png', {
+        maxZoom: 17,
+        attribution: '&copy; OpenStreetMap, SRTM | OpenTopoMap',
+        errorTileUrl: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><rect width="256" height="256" fill="%230F1210"/><path d="M0 0 L256 256" stroke="%23222" stroke-width="1"/></svg>'
+      }),
+      satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 18,
+        attribution: 'Esri World Imagery'
+      }),
+      dark: L.tileLayer('https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png', {
+        maxZoom: 19,
+        attribution: 'CartoDB Dark Basalt'
+      }),
+      osm: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap'
+      })
+    };
+
+    var currentBaseLayer = (baseLayers['topo'] || baseLayers.osm).addTo(map);
+
+    window.setBaseLayer = function(layerName) {
+      if (baseLayers[layerName] && currentBaseLayer !== baseLayers[layerName]) {
+        map.removeLayer(currentBaseLayer);
+        currentBaseLayer = baseLayers[layerName].addTo(map);
+        currentBaseLayer.bringToBack();
+      }
+    };
 
     var trailsData = [];
     var selectedId = '';
@@ -561,6 +588,12 @@ export const TopoMapView = forwardRef<TopoMapViewHandle, TopoMapViewProps>(({
     if (!isMapReadyRef.current) return;
     syncSquadPhotos(squadPhotos);
   }, [squadPhotos]);
+
+  // Handle Base Layer Switch (Topo, Satellite, Dark, OSM)
+  useEffect(() => {
+    if (!isMapReadyRef.current) return;
+    runScript(`window.setBaseLayer('${baseLayer}')`);
+  }, [baseLayer]);
 
   // Handle Trail Selection & Camera Lock (Smooth flyToBounds without resetting)
   useEffect(() => {

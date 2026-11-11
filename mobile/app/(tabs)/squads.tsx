@@ -11,6 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
@@ -49,6 +50,7 @@ import { MeshService, MeshPeerNode, MeshMsgType } from '../../services/meshServi
 type SubView = 'CHAT' | 'CAMP_SYNC' | 'RADAR';
 
 export default function SquadsScreen() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<SubView>('CHAT');
   const [meshActive, setMeshActive] = useState(true);
   const [messages, setMessages] = useState<SquadMessageRecord[]>([]);
@@ -501,12 +503,21 @@ export default function SquadsScreen() {
 
                   {/* Lat/Lon badge if attached */}
                   {msg.lat && msg.lon && (
-                    <View style={styles.coordBadge}>
+                    <TouchableOpacity
+                      style={styles.coordBadge}
+                      onPress={() => {
+                        router.push({
+                          pathname: '/(tabs)/',
+                          params: { pinLat: msg.lat, pinLon: msg.lon },
+                        });
+                      }}
+                      activeOpacity={0.75}
+                    >
                       <MapPin size={11} color={FieldColors.mossNeon} />
                       <Text style={styles.coordBadgeText}>
-                        {msg.lat.toFixed(4)}°N, {msg.lon.toFixed(4)}°E • {Math.round(msg.ele || 0)}m
+                        {msg.lat.toFixed(4)}°N, {msg.lon.toFixed(4)}°E • {Math.round(msg.ele || 0)}m ➔ MAP
                       </Text>
-                    </View>
+                    </TouchableOpacity>
                   )}
                 </View>
               );
@@ -689,9 +700,19 @@ export default function SquadsScreen() {
                     <Text style={styles.sha256Text}>
                       SHA-256: {item.sha256.substring(0, 16)}...
                     </Text>
-                    <Text style={styles.mediaCoordsText}>
-                      📍 {item.lat.toFixed(4)}°N, {item.lon.toFixed(4)}°E ({Math.round(item.ele)}m)
-                    </Text>
+                    <TouchableOpacity
+                      onPress={() => {
+                        router.push({
+                          pathname: '/(tabs)/',
+                          params: { pinLat: item.lat, pinLon: item.lon },
+                        });
+                      }}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={[styles.mediaCoordsText, { color: FieldColors.glacierCyan }]}>
+                        📍 {item.lat.toFixed(4)}°N, {item.lon.toFixed(4)}°E ({Math.round(item.ele)}m) ➔ MAP
+                      </Text>
+                    </TouchableOpacity>
                   </View>
 
                   {/* Transfer Progress bar if syncing */}

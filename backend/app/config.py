@@ -3,9 +3,16 @@
 Loads environment variables with Pydantic v2 Settings.
 """
 
+import os
+import tempfile
 from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
+
+_DEFAULT_DATA_DIR = os.getenv(
+    "TREKINDIA_DATA_DIR",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"),
+)
 
 
 class Settings(BaseSettings):
@@ -23,9 +30,9 @@ class Settings(BaseSettings):
     DATABASE_MAX_OVERFLOW: int = 10
 
     # Topographical & GDAL Settings
-    CARTODEM_VRT_PATH: str = "/var/data/cartodem/cartodem_himalayas.vrt"
-    SOI_STORAGE_DIR: str = "/var/data/soi_sheets"
-    TILE_OUTPUT_DIR: str = "/var/data/tiles"
+    CARTODEM_VRT_PATH: str = os.path.join(_DEFAULT_DATA_DIR, "cartodem", "cartodem_himalayas.vrt")
+    SOI_STORAGE_DIR: str = os.path.join(_DEFAULT_DATA_DIR, "soi_sheets")
+    TILE_OUTPUT_DIR: str = os.path.join(_DEFAULT_DATA_DIR, "tiles")
     MAX_ELEVATION_RATE_M_PER_S: float = 0.4167  # 1500 m / hr
 
     # Cloudflare R2 / S3 Storage

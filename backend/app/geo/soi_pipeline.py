@@ -27,7 +27,13 @@ class SoiPipeline:
 
     def __init__(self, output_dir: Optional[str] = None):
         self.output_dir = output_dir or settings.TILE_OUTPUT_DIR
-        os.makedirs(self.output_dir, exist_ok=True)
+        try:
+            os.makedirs(self.output_dir, exist_ok=True)
+        except Exception as e:
+            logger.warning(f"Could not create output dir {self.output_dir}: {e}. Falling back to system temp dir")
+            import tempfile
+            self.output_dir = os.path.join(tempfile.gettempdir(), "trekindia", "tiles")
+            os.makedirs(self.output_dir, exist_ok=True)
 
     def _init_mbtiles_db(self, mbtiles_path: str, sheet_number: str, bounds: List[float], min_zoom: int, max_zoom: int):
         """Creates standard MBTiles SQLite schema (metadata and tiles table)."""

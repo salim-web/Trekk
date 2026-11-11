@@ -9,6 +9,7 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useLocalSearchParams } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import {
@@ -53,6 +54,7 @@ const DEFAULT_FALLBACK_TRAILS: TrailModel[] =
     : [];
 
 export default function TopoMapScreen() {
+  const routerParams = useLocalSearchParams<{ focusTrackId?: string; pinLat?: string; pinLon?: string }>();
   const topoMapRef = useRef<TopoMapViewHandle>(null);
   const [activeFilter, setActiveFilter] = useState<RegionFilter>('ALL');
   const [selectedTrail, setSelectedTrail] = useState<TrailModel | null>(null);
@@ -66,6 +68,7 @@ export default function TopoMapScreen() {
   // FEATURE 2: SOI Raster Overlay & Inspector State
   const [soiOverlayData, setSoiOverlayData] = useState<SoiExtractionResult | null>(null);
   const [soiOpacity, setSoiOpacity] = useState<number>(0.72);
+  const [mapBaseLayer, setMapBaseLayer] = useState<'topo' | 'satellite' | 'dark' | 'osm'>('topo');
   const [layerVisibility, setLayerVisibility] = useState({
     raw: true,
     footpaths: true,
@@ -81,6 +84,26 @@ export default function TopoMapScreen() {
     loadSavedTracks();
     loadSquadPhotos();
   }, []);
+
+  // Spotlight trail or fly to pin when navigated with params
+  useEffect(() => {
+    if (routerParams?.focusTrackId && importedTrails.length > 0) {
+      const match = importedTrails.find((t) => t.id === routerParams.focusTrackId);
+      if (match) {
+        setSelectedTrail(match);
+        setActiveFilter('IMPORTED');
+      }
+    } else if (routerParams?.pinLat && routerParams?.pinLon) {
+      const lat = parseFloat(String(routerParams.pinLat));
+      const lon = parseFloat(String(routerParams.pinLon));
+      if (!isNaN(lat) && !isNaN(lon)) {
+        topoMapRef.current?.flyToRegion([
+          [lat - 0.015, lon - 0.015],
+          [lat + 0.015, lon + 0.015],
+        ]);
+      }
+    }
+  }, [routerParams?.focusTrackId, routerParams?.pinLat, routerParams?.pinLon, importedTrails]);
 
   const loadSavedTracks = async () => {
     try {
@@ -410,6 +433,7 @@ ${(route.coords || []).map((c) => `      <trkpt lat="${c[0]}" lon="${c[1]}"><ele
           ref={topoMapRef}
           trails={displayedTrails}
           selectedTrail={selectedTrail}
+          baseLayer={mapBaseLayer}
           soiCandidateTrails={soiResult?.candidateTrails ?? []}
           soiOverlayData={soiOverlayData}
           soiOpacity={soiOpacity}
@@ -420,6 +444,36 @@ ${(route.coords || []).map((c) => `      <trkpt lat="${c[0]}" lon="${c[1]}"><ele
           onDeselect={() => setSelectedTrail(null)}
           regionFocus={activeFilter}
         />
+
+        {/* Floating Tactile Base Layer Switcher */}
+        <View style={styles.floatingBaseLayerBar}>
+          {(['topo', 'satellite', 'dark', 'osm'] as const).map((layer) => (
+            <TouchableOpacity
+              key={layer}
+              style={[
+                styles.baseLayerBtn,
+                mapBaseLayer === layer && styles.baseLayerBtnActive,
+              ]}
+              onPress={() => setMapBaseLayer(layer)}
+              activeOpacity={0.8}
+            >
+              <Text
+                style={[
+                  styles.baseLayerBtnText,
+                  mapBaseLayer === layer && styles.baseLayerBtnTextActive,
+                ]}
+              >
+                {layer === 'topo'
+                  ? 'TOPO'
+                  : layer === 'satellite'
+                  ? 'SAT'
+                  : layer === 'dark'
+                  ? 'BASALT'
+                  : 'OSM'}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
         {/* FEATURE 2: Floating SOI Sheet Inspector Bar */}
         {soiOverlayData && (
@@ -1285,5 +1339,42 @@ const styles = StyleSheet.create({
   },
   actionRow: {
     marginTop: 4,
+  },
+  floatingBaseLayerBar: {
+    position: 'absolute',
+    top: 10,
+    right: 12,
+    flexDirection: 'row',
+    backgroundColor: 'rgba(15, 18, 16, 0.92)',
+    borderWidth: 1.2,
+    borderColor: '#242F28',
+    borderRadius: 6,
+    padding: 3,
+    gap: 3,
+    zIndex: 30,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  baseLayerBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 7,
+    borderRadius: 4,
+  },
+  baseLayerBtnActive: {
+    backgroundColor: FieldColors.contourOchre,
+  },
+  baseLayerBtnText: {
+    fontFamily: FieldTypography.mono,
+    fontSize: 8.5,
+    fontWeight: '800',
+    color: '#8A9990',
+    letterSpacing: 0.5,
+  },
+  baseLayerBtnTextActive: {
+    color: '#0F1210',
+    fontWeight: '900',
   },
 });
