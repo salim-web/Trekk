@@ -1,9 +1,9 @@
 """FastAPI Router for Geospatial & Topographical Operations."""
 
 import os
-import shutil
 import tempfile
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi.concurrency import run_in_threadpool
 from app.schemas.geo_schemas import (
     ElevationSnapRequest,
     ElevationSnapResponse,
@@ -16,6 +16,9 @@ from app.geo.soi_pipeline import soi_pipeline
 from app.geo.overpass_harvester import overpass_harvester
 
 router = APIRouter(prefix="", tags=["Geospatial & Topography"])
+
+MAX_SOI_UPLOAD_BYTES = 50 * 1024 * 1024
+SOI_UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
 @router.post("/elevation/snap", response_model=ElevationSnapResponse)
@@ -37,22 +40,25 @@ async def snap_elevation(request: ElevationSnapRequest):
 @router.post("/geo/soi/georeference", response_model=SoiGeoreferenceResponse)
 async def georeference_soi_sheet(
     sheet_number: str = Form(..., description="e.g. 53J/3"),
-    tl_lat: float = Form(...),
-    tl_lon: float = Form(...),
-    tr_lat: float = Form(...),
-    tr_lon: float = Form(...),
-    br_lat: float = Form(...),
-    br_lon: float = Form(...),
-    bl_lat: float = Form(...),
-    bl_lon: float = Form(...),
-    min_zoom: int = Form(11),
-    max_zoom: int = Form(15),
+    tl_lat: float = Form(..., ge=-90, le=90),
+    tl_lon: float = Form(..., ge=-180, le=180),
+    tr_lat: float = Form(..., ge=-90, le=90),
+    tr_lon: float = Form(..., ge=-180, le=180),
+    br_lat: float = Form(..., ge=-90, le=90),
+    br_lon: float = Form(..., ge=-180, le=180),
+    bl_lat: float = Form(..., ge=-90, le=90),
+    bl_lon: float = Form(..., ge=-180, le=180),
+    min_zoom: int = Form(11, ge=8, le=18),
+    max_zoom: int = Form(15, ge=8, le=18),
     sheet_file: UploadFile = File(...),
 ):
     """Georeferences an uploaded Survey of India 1:50k PDF/GeoTIFF using 4-corner neatline GCPs
 
     and exports an EPSG:3857 MBTiles raster tile archive.
     """
+    if min_zoom > max_zoom:
+        raise HTTPException(status_code=422, detail="min_zoom must not exceed max_zoom")
+
     corners = (
         (tl_lat, tl_lon),
         (tr_lat, tr_lon),
@@ -60,23 +66,34 @@ async def georeference_soi_sheet(
         (bl_lat, bl_lon),
     )
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(sheet_file.filename)[1]) as tmp:
-        shutil.copyfileobj(sheet_file.file, tmp)
-        tmp_path = tmp.name
+    content = bytearray()
+    while len(content) <= MAX_SOI_UPLOAD_BYTES:
+        chunk = await sheet_file.read(min(SOI_UPLOAD_CHUNK_BYTES, MAX_SOI_UPLOAD_BYTES + 1 - len(content)))
+        if not chunk:
+            break
+        content.extend(chunk)
+    if len(content) > MAX_SOI_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="SOI upload exceeds the 50 MiB limit")
 
+    suffix = os.path.splitext(sheet_file.filename or "")[1][:10]
+    tmp_path = None
     try:
-        result = soi_pipeline.georeference_sheet(
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp_path = tmp.name
+            await run_in_threadpool(tmp.write, content)
+
+        return await run_in_threadpool(
+            soi_pipeline.georeference_sheet,
             input_pdf_or_image_path=tmp_path,
             sheet_number=sheet_number,
             corners_latlon=corners,
             min_zoom=min_zoom,
             max_zoom=max_zoom,
         )
-        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Georeferencing pipeline failed: {str(e)}")
     finally:
-        if os.path.exists(tmp_path):
+        if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)
 
 
@@ -84,7 +101,7 @@ async def georeference_soi_sheet(
 async def harvest_osm(request: OsmHarvestRequest):
     """Harvests paths, water springs, campsites, and peaks within a Himalayan bounding box via Overpass QL."""
     try:
-        return overpass_harvester.harvest(bbox=request.bbox)
+        return await run_in_threadpool(overpass_harvester.harvest, bbox=request.bbox)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OSM harvest failed: {str(e)}")
 

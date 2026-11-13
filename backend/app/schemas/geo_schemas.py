@@ -1,7 +1,8 @@
 """Pydantic v2 Schemas for Geospatial & Topographical Operations."""
 
+import math
 from typing import List, Optional, Tuple
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class RawGpsPoint(BaseModel):
@@ -72,6 +73,18 @@ class OsmHarvestRequest(BaseModel):
         default=["hiking_routes", "springs", "drinking_water", "campsites", "peaks", "passes"],
         description="OSM tags to harvest",
     )
+
+    @field_validator("bbox")
+    @classmethod
+    def validate_bbox(cls, bbox: List[float]) -> List[float]:
+        min_lat, min_lon, max_lat, max_lon = bbox
+        if not all(math.isfinite(value) for value in bbox):
+            raise ValueError("bbox coordinates must be finite")
+        if not (-90 <= min_lat < max_lat <= 90 and -180 <= min_lon < max_lon <= 180):
+            raise ValueError("bbox must have ordered latitude and longitude bounds within WGS84")
+        if max_lat - min_lat > 0.5 or max_lon - min_lon > 0.5:
+            raise ValueError("bbox may span at most 0.5 degrees per side")
+        return bbox
 
 
 class OsmHarvestFeature(BaseModel):

@@ -100,8 +100,11 @@ class SoiPipeline:
                 message = f"Generated fallback MBTiles overlay for {sheet_number}: {e}"
         else:
             self._fallback_mbtiles_creation(mbtiles_path, sheet_number, bounds, min_zoom, max_zoom)
-            status = "ready"
-            message = f"Sheet {sheet_number} georeferenced via native raster tile engine."
+            status = "fallback_generated"
+            message = (
+                f"Generated a placeholder MBTiles file for {sheet_number}; "
+                "GDAL is unavailable, so the uploaded sheet was not georeferenced."
+            )
 
         return SoiGeoreferenceResponse(
             sheet_number=sheet_number,

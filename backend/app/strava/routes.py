@@ -3,6 +3,7 @@
 import requests
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from app.config import settings
 from app.geo.track_parser import backend_track_parser
@@ -49,10 +50,12 @@ async def exchange_strava_token(request: StravaTokenExchangeRequest):
     }
 
     try:
-        resp = requests.post(token_url, data=payload, timeout=15)
+        resp = await run_in_threadpool(requests.post, token_url, data=payload, timeout=15)
         if resp.status_code == 200:
             return resp.json()
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Strava token exchange failed: {str(e)}")
 
@@ -64,7 +67,7 @@ async def repair_strava_activity(request: StravaRepairRequest):
     and uploading a high-resolution GPX 1.1 file with Garmin biometric extensions.
     """
     # 1. Snap to CartoDEM
-    snapped = cartodem_engine.snap_track(request.points, apply_smoothing=True)
+    snapped = await run_in_threadpool(cartodem_engine.snap_track, request.points, apply_smoothing=True)
 
     # 2. Compile GPX 1.1
     gpx_lines = [
@@ -103,7 +106,14 @@ async def repair_strava_activity(request: StravaRepairRequest):
     }
 
     try:
-        resp = requests.post(upload_url, headers=headers, files=files, data=data, timeout=30)
+        resp = await run_in_threadpool(
+            requests.post,
+            upload_url,
+            headers=headers,
+            files=files,
+            data=data,
+            timeout=30,
+        )
         if resp.status_code in [200, 201]:
             return {
                 "status": "success",

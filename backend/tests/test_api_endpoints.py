@@ -1,8 +1,52 @@
 """Integration tests for TrekIndia FastAPI API endpoints."""
 
+import uuid
+from datetime import datetime, timezone
+from threading import get_ident
+
 import pytest
+import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+from app.db.database import get_db
+from app.db.models import PartyMedia, TrekParty, TrekPartyMember, User
 from app.main import app
+
+
+@pytest_asyncio.fixture
+async def party_db_override():
+    records = {}
+
+    class Session:
+        async def get(self, model, key):
+            return records.get(model, {}).get(key)
+
+        def add(self, record):
+            model_records = records.setdefault(type(record), {})
+            if isinstance(record, TrekPartyMember):
+                key = (record.party_id, record.user_id)
+            else:
+                if getattr(record, "id", None) is None:
+                    record.id = uuid.uuid4()
+                key = record.id
+            if isinstance(record, TrekParty):
+                record.created_at = datetime.now(timezone.utc)
+            elif isinstance(record, TrekPartyMember):
+                record.joined_at = datetime.now(timezone.utc)
+            elif isinstance(record, PartyMedia):
+                record.created_at = datetime.now(timezone.utc)
+            model_records[key] = record
+
+        async def flush(self):
+            pass
+
+    async def override_get_db():
+        yield Session()
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        yield records
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
 @pytest.mark.asyncio
@@ -37,7 +81,11 @@ async def test_elevation_snap_api():
 
 
 @pytest.mark.asyncio
-async def test_party_lifecycle_api():
+async def test_party_lifecycle_api(party_db_override):
+    user_id = uuid.UUID("11111111-2222-3333-4444-555555555555")
+    party_db_override[User] = {
+        user_id: User(id=user_id, name="Trekker One", email="trekker@example.com")
+    }
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # 1. Create Party currently active (started yesterday, ends in 3 days)
         from datetime import datetime, timezone, timedelta
@@ -87,6 +135,135 @@ async def test_party_lifecycle_api():
         assert media["storage_key"] == "parties/kedarkantha/summit_ridge_frozen.jpg"
         assert media["lat"] == 0.0
         assert media["lon"] == 0.0
+        assert party_db_override[TrekParty][uuid.UUID(party_id)].name == party["name"]
+        assert (uuid.UUID(party_id), user_id) in party_db_override[TrekPartyMember]
+        assert len(party_db_override[PartyMedia]) == 1
+
+
+@pytest.mark.asyncio
+async def test_georeference_soi_rejects_oversized_upload(monkeypatch):
+    import app.geo.routes as geo_routes
+
+    monkeypatch.setattr(geo_routes, "MAX_SOI_UPLOAD_BYTES", 3)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/geo/soi/georeference",
+            data={
+                "sheet_number": "53J/3",
+                "tl_lat": "31.1", "tl_lon": "78.1",
+                "tr_lat": "31.1", "tr_lon": "78.2",
+                "br_lat": "31.0", "br_lon": "78.2",
+                "bl_lat": "31.0", "bl_lon": "78.1",
+            },
+            files={"sheet_file": ("sheet.tif", b"four", "image/tiff")},
+        )
+    assert response.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_georeference_soi_runs_pipeline_off_event_loop(monkeypatch):
+    import app.geo.routes as geo_routes
+    from app.schemas.geo_schemas import SoiGeoreferenceResponse
+
+    seen = {}
+    main_thread = get_ident()
+
+    def fake_georeference(**kwargs):
+        seen["thread"] = get_ident()
+        with open(kwargs["input_pdf_or_image_path"], "rb") as uploaded:
+            seen["content"] = uploaded.read()
+        return SoiGeoreferenceResponse(
+            sheet_number="53J/3", mbtiles_url="/tiles/test.mbtiles",
+            bounds_bbox=[78.1, 31.0, 78.2, 31.1], min_zoom=11, max_zoom=15,
+            status="ready", message="Georeferenced",
+        )
+
+    monkeypatch.setattr(geo_routes.soi_pipeline, "georeference_sheet", fake_georeference)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/geo/soi/georeference",
+            data={
+                "sheet_number": "53J/3",
+                "tl_lat": "31.1", "tl_lon": "78.1",
+                "tr_lat": "31.1", "tr_lon": "78.2",
+                "br_lat": "31.0", "br_lon": "78.2",
+                "bl_lat": "31.0", "bl_lon": "78.1",
+            },
+            files={"sheet_file": ("sheet.tif", b"map", "image/tiff")},
+        )
+    assert response.status_code == 200
+    assert seen["content"] == b"map"
+    assert seen["thread"] != main_thread
+
+
+def test_soi_without_gdal_reports_placeholder_not_georeferenced(tmp_path, monkeypatch):
+    import app.geo.soi_pipeline as pipeline_module
+    from app.geo.soi_pipeline import SoiPipeline
+
+    monkeypatch.setattr(pipeline_module, "HAS_GDAL", False)
+    result = SoiPipeline(output_dir=str(tmp_path)).georeference_sheet(
+        input_pdf_or_image_path="unused.tif",
+        sheet_number="53J/3",
+        corners_latlon=((31.1, 78.1), (31.1, 78.2), (31.0, 78.2), (31.0, 78.1)),
+    )
+    assert result.status == "fallback_generated"
+    assert "was not georeferenced" in result.message
+
+
+@pytest.mark.asyncio
+async def test_osm_harvest_rejects_unbounded_bbox():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/geo/harvest-osm",
+            json={"bbox": [30.0, 78.0, 30.6, 78.5]},
+        )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_osm_harvest_runs_off_event_loop(monkeypatch):
+    import app.geo.routes as geo_routes
+    from app.schemas.geo_schemas import OsmHarvestResponse
+
+    main_thread = get_ident()
+    seen = []
+
+    def fake_harvest(bbox):
+        seen.append(get_ident())
+        return OsmHarvestResponse(status="success", total_harvested=0, features=[])
+
+    monkeypatch.setattr(geo_routes.overpass_harvester, "harvest", fake_harvest)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/geo/harvest-osm",
+            json={"bbox": [30.0, 78.0, 30.2, 78.2]},
+        )
+    assert response.status_code == 200
+    assert seen and seen[0] != main_thread
+
+
+@pytest.mark.asyncio
+async def test_strava_token_exchange_runs_off_event_loop(monkeypatch):
+    import app.strava.routes as strava_routes
+
+    main_thread = get_ident()
+    seen = []
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"access_token": "test"}
+
+    def fake_post(*args, **kwargs):
+        seen.append(get_ident())
+        return Response()
+
+    monkeypatch.setattr(strava_routes.requests, "post", fake_post)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/api/v1/strava/oauth/exchange", json={"code": "test"})
+    assert response.status_code == 200
+    assert seen and seen[0] != main_thread
 
 
 @pytest.mark.asyncio
