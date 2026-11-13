@@ -68,16 +68,24 @@ export default function SavedScreen() {
 
   const handleExportGpx = async (track: ParsedTrack) => {
     try {
+      const escapeXml = (value: string) => value.replace(/[<>&'\"]/g, (char) => {
+        const escapes: Record<string, string> = {
+          '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;',
+        };
+        return escapes[char];
+      });
+      const escapedTrackName = escapeXml(track.name);
       const gpxLines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<gpx version="1.1" creator="TrekIndia Tactical Field-Instrument"',
         '  xmlns="http://www.topografix.com/GPX/1/1"',
         '  xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">',
         '  <metadata>',
-        `    <name>${track.name}</name>`,
+        `    <name>${escapedTrackName}</name>`,
         '  </metadata>',
         '  <trk>',
-        `    <name>${track.name}</name>`,
+        `    <name>${escapedTrackName}</name>`,
+
         '    <type>hiking</type>',
         '    <trkseg>',
       ];
@@ -85,7 +93,7 @@ export default function SavedScreen() {
       for (const pt of track.points) {
         gpxLines.push(`      <trkpt lat="${pt.latitude.toFixed(6)}" lon="${pt.longitude.toFixed(6)}">`);
         gpxLines.push(`        <ele>${pt.elevation.toFixed(1)}</ele>`);
-        if (pt.timestamp) gpxLines.push(`        <time>${pt.timestamp}</time>`);
+        if (pt.timestamp) gpxLines.push(`        <time>${escapeXml(pt.timestamp)}</time>`);
         if (pt.heartRate) {
           gpxLines.push('        <extensions>');
           gpxLines.push('          <gpxtpx:TrackPointExtension>');

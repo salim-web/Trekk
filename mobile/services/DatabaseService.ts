@@ -128,8 +128,7 @@ export class DatabaseService {
       return trackWithId;
     } catch (e) {
       console.error('Error saving track to SQLite:', e);
-      this.memoryTracks.unshift(trackWithId);
-      return trackWithId;
+      throw e;
     }
   }
 

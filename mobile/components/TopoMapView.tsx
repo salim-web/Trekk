@@ -48,6 +48,7 @@ export const TopoMapView = forwardRef<TopoMapViewHandle, TopoMapViewProps>(({
 }, ref) => {
   const webViewRef = useRef<WebView>(null);
   const isMapReadyRef = useRef<boolean>(false);
+  const pendingRegionRef = useRef<[number, number][] | null>(null);
 
   // CRITICAL: Memoize HTML with EMPTY dependencies [] so WebView NEVER unmounts or reloads!
   const initialMapHtml = useMemo(() => {
@@ -223,7 +224,7 @@ export const TopoMapView = forwardRef<TopoMapViewHandle, TopoMapViewProps>(({
         // Summit Marker (Orange Pill)
         var summitCoord = latLngs[latLngs.length - 1];
         if (summitCoord) {
-          var altM = trail.maxAltM || trail.maxAltitudeM || (latLngs[latLngs.length - 1][2]) || 3000;
+          var altM = trail.maxAltM ?? trail.maxAltitudeM ?? latLngs[latLngs.length - 1][2] ?? 3000;
           var summitIcon = L.divIcon({
             className: 'summit-pill',
             html: '🏔 ' + Math.round(altM) + 'm',
@@ -466,7 +467,7 @@ export const TopoMapView = forwardRef<TopoMapViewHandle, TopoMapViewProps>(({
     window.renderSquadPhotoPins = function(photosList) {
       window.squadPhotosLayer.clearLayers();
       (photosList || []).forEach(function(photo) {
-        if (!photo.lat || !photo.lon) return;
+        if (photo.lat == null || photo.lon == null) return;
 
         var iconHtml = '<div class=\"photo-pin\">📸 ' + (photo.name || 'Photo').split('.')[0].substring(0, 10) + '</div>';
         var pinIcon = L.divIcon({
@@ -516,16 +517,34 @@ export const TopoMapView = forwardRef<TopoMapViewHandle, TopoMapViewProps>(({
   };
 
   // On WebView load completion
-  const handleLoadEnd = () => {
+  const handleMapReady = () => {
     isMapReadyRef.current = true;
     syncTrailsToMap(true);
-    if (soiOverlayData) {
-      applySoiOverlay(soiOverlayData, soiOpacity);
+    runScript(`window.setBaseLayer('${baseLayer}')`);
+    if (!selectedTrail && regionFocus) {
+      const regions: Record<string, [number, number][]> = {
+        HIMALAYAS: [[27.0, 74.0], [35.5, 89.0]],
+        WESTERN_GHATS: [[12.66, 73.39], [19.63, 75.69]],
+        'WESTERN GHATS': [[12.66, 73.39], [19.63, 75.69]],
+        NORTH_EAST: [[25.38, 91.73], [25.57, 94.12]],
+        'NORTH-EAST': [[25.38, 91.73], [25.57, 94.12]],
+      };
+      const regionalBounds = regions[regionFocus.toUpperCase()];
+      if (regionalBounds) runScript(`window.flyToRegion(${JSON.stringify(regionalBounds)})`);
     }
-    if (squadPhotos.length > 0) {
-      syncSquadPhotos(squadPhotos);
+    if (selectedTrail?.routeCoords?.length) {
+      const coords = selectedTrail.routeCoords.map((c) => [c[0], c[1]]);
+      runScript(`window.selectTrailOnMap('${selectedTrail.id}', ${JSON.stringify(coords)})`);
+    }
+    if (soiOverlayData) applySoiOverlay(soiOverlayData, soiOpacity);
+    if (squadPhotos.length > 0) syncSquadPhotos(squadPhotos);
+    if (pendingRegionRef.current) {
+      runScript(`window.flyToRegion(${JSON.stringify(pendingRegionRef.current)})`);
+      pendingRegionRef.current = null;
     }
   };
+
+  const handleLoadEnd = () => handleMapReady();
 
   const applySoiOverlay = (data: SoiExtractionResult, opacity: number) => {
     const boundsJson = JSON.stringify(data.bounds);
@@ -542,6 +561,10 @@ export const TopoMapView = forwardRef<TopoMapViewHandle, TopoMapViewProps>(({
       runScript(`window.focusSoiTrail('${trailId}', ${JSON.stringify(coords)})`);
     },
     flyToRegion: (bounds: [number, number][]) => {
+      if (!isMapReadyRef.current) {
+        pendingRegionRef.current = bounds;
+        return;
+      }
       runScript(`window.flyToRegion(${JSON.stringify(bounds)})`);
     },
   }));
@@ -609,7 +632,7 @@ export const TopoMapView = forwardRef<TopoMapViewHandle, TopoMapViewProps>(({
 
   // Handle Regional Filter Camera Flight
   useEffect(() => {
-    if (!regionFocus || !isMapReadyRef.current) return;
+    if (!regionFocus || !isMapReadyRef.current || selectedTrail) return;
 
     const rf = regionFocus.toUpperCase();
     let bounds: [number, number][] = [];
@@ -656,20 +679,13 @@ export const TopoMapView = forwardRef<TopoMapViewHandle, TopoMapViewProps>(({
     if (bounds.length > 0) {
       runScript(`window.flyToRegion(${JSON.stringify(bounds)})`);
     }
-  }, [regionFocus]);
+  }, [regionFocus, selectedTrail, trails]);
 
   const handleMessage = (event: any) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
       if (data.type === 'MAP_READY') {
-        isMapReadyRef.current = true;
-        syncTrailsToMap(true);
-        if (soiOverlayData) {
-          applySoiOverlay(soiOverlayData, soiOpacity);
-        }
-        if (squadPhotos.length > 0) {
-          syncSquadPhotos(squadPhotos);
-        }
+        handleMapReady();
       } else if (data.type === 'SELECT_TRAIL') {
         const found = (trails || []).find((t) => t.id === data.id);
         if (found) {

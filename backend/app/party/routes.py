@@ -117,8 +117,8 @@ async def pin_spatial_media(party_id: uuid.UUID, media_in: SpatialPhotoPinReques
         "thumbnail_key": media_in.thumbnail_key,
         "is_public": media_in.is_public,
         "captured_at": media_in.captured_at,
-        "lat": media_in.lat or 30.7345,
-        "lon": media_in.lon or 79.0673,
+        "lat": media_in.lat if media_in.lat is not None else 30.7345,
+        "lon": media_in.lon if media_in.lon is not None else 79.0673,
         "elevation_m": media_in.elevation_m or 3534.0,
         "created_at": datetime.now(timezone.utc),
     }

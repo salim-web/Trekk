@@ -76,8 +76,8 @@ async def test_party_lifecycle_api():
             "uploaded_by": "11111111-2222-3333-4444-555555555555",
             "storage_key": "parties/kedarkantha/summit_ridge_frozen.jpg",
             "captured_at": "2026-12-18T10:30:00Z",
-            "lat": 31.0238,
-            "lon": 78.1722,
+            "lat": 0.0,
+            "lon": 0.0,
             "elevation_m": 3810.0,
             "is_public": True,
         }
@@ -85,7 +85,8 @@ async def test_party_lifecycle_api():
         assert pin_resp.status_code == 200
         media = pin_resp.json()
         assert media["storage_key"] == "parties/kedarkantha/summit_ridge_frozen.jpg"
-        assert media["lat"] == 31.0238
+        assert media["lat"] == 0.0
+        assert media["lon"] == 0.0
 
 
 @pytest.mark.asyncio

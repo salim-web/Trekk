@@ -5,7 +5,7 @@
 **Auditor & Lead**: Antigravity Engineering System Audit  
 **Active Git Branch**: `features-fixing` (Commit: `8718c10`)  
 **Codebase**: `TrekIndia` (Mobile: React Native Expo SDK 54 / Backend: FastAPI 0.111 + Python 3.11 + PostGIS + CartoDEM)  
-**Reference Document**: [`CONTEXT.md`](file:///home/sumeet/git/Trekk/CONTEXT.md)
+**Reference Document**: [`CONTEXT.md`](CONTEXT.md)
 
 ---
 
@@ -25,38 +25,38 @@ This document serves as both the **initial baseline architectural audit** and th
 
 | Component | Target Architecture | Implementation Reality | Functional Status |
 |---|---|---|---|
-| **CartoDEM Elevation Snapping** | ISRO 30m GeoTIFF + Bilinear Interp + Savitzky-Golay + Velocity Clamping | Implemented in [`backend/app/geo/cartodem.py`](file:///home/sumeet/git/Trekk/backend/app/geo/cartodem.py) with synthetic Himalayan ridge fallback. Unit tests pass (6/6). | 🟢 **WORKING (Core Math & Fallback)** |
-| **Track File Parser (Backend)** | Multi-format GPX 1.1 & TCX parser with HR extensions | Implemented in [`backend/app/geo/track_parser.py`](file:///home/sumeet/git/Trekk/backend/app/geo/track_parser.py). Unit tests pass. | 🟢 **WORKING** |
-| **Party State Machine & Spatial EXIF** | 4-state lifecycle (`planning` $\rightarrow$ `active` $\rightarrow$ `sync_window` $\rightarrow$ `archived`) + time-based GPS photo interpolation | Implemented in [`backend/app/party/state_machine.py`](file:///home/sumeet/git/Trekk/backend/app/party/state_machine.py) and [`backend/app/party/exif_spatial.py`](file:///home/sumeet/git/Trekk/backend/app/party/exif_spatial.py). Unit tests pass. | 🟢 **WORKING** |
-| **Backend Config & Import Permissions** | Dynamic configurable storage directories with non-root fallback | Fixed in [`backend/app/config.py`](file:///home/sumeet/git/Trekk/backend/app/config.py) & [`backend/app/geo/soi_pipeline.py`](file:///home/sumeet/git/Trekk/backend/app/geo/soi_pipeline.py). Imports cleanly anywhere. | 🟢 **FIXED & WORKING** |
-| **Backend Database Persistence** | PostgreSQL 16 + PostGIS 3.4 async SQLAlchemy models | Models defined in [`backend/app/db/models.py`](file:///home/sumeet/git/Trekk/backend/app/db/models.py). In-memory fallback used for standalone/local execution. | 🟡 **STANDALONE FALLBACK** |
-| **Mobile Multi-Format Parser** | GPX 1.1, TCX, binary FIT decoding with semicircles & Garmin HR | Implemented in [`mobile/services/TrackParser.ts`](file:///home/sumeet/git/Trekk/mobile/services/TrackParser.ts). Pure TypeScript. Unit tests pass (3/3). | 🟢 **WORKING & TESTED** |
-| **Mobile SQLite Offline Storage** | `expo-sqlite` tables with in-memory web fallback | Implemented in [`mobile/services/DatabaseService.ts`](file:///home/sumeet/git/Trekk/mobile/services/DatabaseService.ts) for imported tracks, squad messages, and media. | 🟢 **WORKING** |
-| **Live Trail Recording Instrument** | Real GPS tracking (`expo-location`), compass heading, elevation gain, and SQLite persistence | Overhauled in [`mobile/app/(tabs)/record.tsx`](file:///home/sumeet/git/Trekk/mobile/app/(tabs)/record.tsx). Real GPS fix, live elevation sparkline bar chart, and auto-save. | 🟢 **FIXED & WORKING** |
-| **Interactive Topo Leaflet Map** | Multi-source base tiles (`TOPO`, `SATELLITE`, `BASALT OLED`, `OSM`) + SOI raster overlay + elevation chart | Implemented in [`mobile/components/TopoMapView.tsx`](file:///home/sumeet/git/Trekk/mobile/components/TopoMapView.tsx) & [`mobile/app/(tabs)/index.tsx`](file:///home/sumeet/git/Trekk/mobile/app/(tabs)/index.tsx). | 🟢 **ENHANCED & WORKING** |
-| **Saved Trails & GPX Sharing** | Inspect saved tracks on Topo Map + export GPX 1.1 with HR extension | Implemented in [`mobile/app/(tabs)/saved.tsx`](file:///home/sumeet/git/Trekk/mobile/app/(tabs)/saved.tsx) using `expo-sharing` and `expo-file-system/legacy`. | 🟢 **FIXED & WORKING** |
-| **Physical BLE Mesh (31-byte packets)** | 31-byte binary packet encoder/decoder + LRU deduplication + multi-hop TTL | Implemented in [`mobile/services/meshService.ts`](file:///home/sumeet/git/Trekk/mobile/services/meshService.ts) with standard Web Crypto API. Unit tests pass (4/4). | 🟢 **CODEC WORKING / HARDWARE SIMULATED** |
-| **Local Wi-Fi Camp Sync** | Embedded HTTP/WebSocket server running on leader's phone | Interactive UI in [`mobile/app/(tabs)/squads.tsx`](file:///home/sumeet/git/Trekk/mobile/app/(tabs)/squads.tsx) simulates delta transfer and pins photos to map. | 🟡 **SIMULATED** |
-| **Seeded Iconic Treks Dataset** | 10 iconic Indian trails with verified WGS-84 dense coordinates | Implemented in [`mobile/constants/SeededTrails.ts`](file:///home/sumeet/git/Trekk/mobile/constants/SeededTrails.ts). | 🟢 **WORKING** |
-| **Tactile Field-Instrument UI** | Basalt/Pine/Rescue Orange tactile tokens & KnurledButtons | Implemented in [`mobile/constants/FieldTokens.ts`](file:///home/sumeet/git/Trekk/mobile/constants/FieldTokens.ts) and [`mobile/components/KnurledButton.tsx`](file:///home/sumeet/git/Trekk/mobile/components/KnurledButton.tsx). | 🟢 **WORKING** |
-| **Client-Side SOI Topo Synthesis & Extraction** | Synthesize 1:50,000 vintage SVG rasters & extract ridge/valley routes | 810 lines of mathematical graticule and contour modeling in [`mobile/services/soiAnalyzerService.ts`](file:///home/sumeet/git/Trekk/mobile/services/soiAnalyzerService.ts). | 🟢 **WORKING (Client-side engine)** |
+| **CartoDEM Elevation Snapping** | ISRO 30m GeoTIFF + Bilinear Interp + Savitzky-Golay + Velocity Clamping | Implemented in [`backend/app/geo/cartodem.py`](backend/app/geo/cartodem.py) with synthetic Himalayan ridge fallback. Unit tests pass (6/6). | 🟢 **WORKING (Core Math & Fallback)** |
+| **Track File Parser (Backend)** | Multi-format GPX 1.1 & TCX parser with HR extensions | Implemented in [`backend/app/geo/track_parser.py`](backend/app/geo/track_parser.py). Unit tests pass. | 🟢 **WORKING** |
+| **Party State Machine & Spatial EXIF** | 4-state lifecycle (`planning` $\rightarrow$ `active` $\rightarrow$ `sync_window` $\rightarrow$ `archived`) + time-based GPS photo interpolation | Implemented in [`backend/app/party/state_machine.py`](backend/app/party/state_machine.py) and [`backend/app/party/exif_spatial.py`](backend/app/party/exif_spatial.py). Unit tests pass. | 🟢 **WORKING** |
+| **Backend Config & Import Permissions** | Dynamic configurable storage directories with non-root fallback | Fixed in [`backend/app/config.py`](backend/app/config.py) & [`backend/app/geo/soi_pipeline.py`](backend/app/geo/soi_pipeline.py). Imports cleanly anywhere. | 🟢 **FIXED & WORKING** |
+| **Backend Database Persistence** | PostgreSQL 16 + PostGIS 3.4 async SQLAlchemy models | Models defined in [`backend/app/db/models.py`](backend/app/db/models.py). In-memory fallback used for standalone/local execution. | 🟡 **STANDALONE FALLBACK** |
+| **Mobile Multi-Format Parser** | GPX 1.1, TCX, binary FIT decoding with semicircles & Garmin HR | Implemented in [`mobile/services/TrackParser.ts`](mobile/services/TrackParser.ts). Pure TypeScript. Unit tests pass (3/3). | 🟢 **WORKING & TESTED** |
+| **Mobile SQLite Offline Storage** | `expo-sqlite` tables with in-memory web fallback | Implemented in [`mobile/services/DatabaseService.ts`](mobile/services/DatabaseService.ts) for imported tracks, squad messages, and media. | 🟢 **WORKING** |
+| **Live Trail Recording Instrument** | Real GPS tracking (`expo-location`), compass heading, elevation gain, and SQLite persistence | Overhauled in [`mobile/app/(tabs)/record.tsx`](mobile/app/(tabs)/record.tsx). Real GPS fix, live elevation sparkline bar chart, and auto-save. | 🟢 **FIXED & WORKING** |
+| **Interactive Topo Leaflet Map** | Multi-source base tiles (`TOPO`, `SATELLITE`, `BASALT OLED`, `OSM`) + SOI raster overlay + elevation chart | Implemented in [`mobile/components/TopoMapView.tsx`](mobile/components/TopoMapView.tsx) & [`mobile/app/(tabs)/index.tsx`](mobile/app/(tabs)/index.tsx). | 🟢 **ENHANCED & WORKING** |
+| **Saved Trails & GPX Sharing** | Inspect saved tracks on Topo Map + export GPX 1.1 with HR extension | Implemented in [`mobile/app/(tabs)/saved.tsx`](mobile/app/(tabs)/saved.tsx) using `expo-sharing` and `expo-file-system/legacy`. | 🟢 **FIXED & WORKING** |
+| **Physical BLE Mesh (31-byte packets)** | 31-byte binary packet encoder/decoder + LRU deduplication + multi-hop TTL | Implemented in [`mobile/services/meshService.ts`](mobile/services/meshService.ts) with standard Web Crypto API. Unit tests pass (4/4). | 🟢 **CODEC WORKING / HARDWARE SIMULATED** |
+| **Local Wi-Fi Camp Sync** | Embedded HTTP/WebSocket server running on leader's phone | Interactive UI in [`mobile/app/(tabs)/squads.tsx`](mobile/app/(tabs)/squads.tsx) simulates delta transfer and pins photos to map. | 🟡 **SIMULATED** |
+| **Seeded Iconic Treks Dataset** | 10 iconic Indian trails with verified WGS-84 dense coordinates | Implemented in [`mobile/constants/SeededTrails.ts`](mobile/constants/SeededTrails.ts). | 🟢 **WORKING** |
+| **Tactile Field-Instrument UI** | Basalt/Pine/Rescue Orange tactile tokens & KnurledButtons | Implemented in [`mobile/constants/FieldTokens.ts`](mobile/constants/FieldTokens.ts) and [`mobile/components/KnurledButton.tsx`](mobile/components/KnurledButton.tsx). | 🟢 **WORKING** |
+| **Client-Side SOI Topo Synthesis & Extraction** | Synthesize 1:50,000 vintage SVG rasters & extract ridge/valley routes | 810 lines of mathematical graticule and contour modeling in [`mobile/services/soiAnalyzerService.ts`](mobile/services/soiAnalyzerService.ts). | 🟢 **WORKING (Client-side engine)** |
 
 ---
 
 ## 2. Fixes & Enhancements Completed on Branch `features-fixing`
 
 ### 2.1 Backend Improvements & Zero-Crash Startup
-1. **Configurable Paths & Permission Safety** ([`backend/app/config.py`](file:///home/sumeet/git/Trekk/backend/app/config.py) & [`backend/app/geo/soi_pipeline.py`](file:///home/sumeet/git/Trekk/backend/app/geo/soi_pipeline.py)):
+1. **Configurable Paths & Permission Safety** ([`backend/app/config.py`](backend/app/config.py) & [`backend/app/geo/soi_pipeline.py`](backend/app/geo/soi_pipeline.py)):
    - Replaced root `/var/data` directory defaults with dynamic workspace paths (`./data/tiles`, `./data/cartodem`) or system temporary directories via `os.getenv("TREKINDIA_DATA_DIR")`.
    - Wrapped directory creation in fallback logic so that importing `app.main` never fails with `PermissionError: [Errno 13]`.
 2. **Party Lifecycle Evaluation**:
-   - Fixed [`backend/app/party/routes.py`](file:///home/sumeet/git/Trekk/backend/app/party/routes.py) so `pin_spatial_media` evaluates the party's dynamic time-based state (`planning` $\rightarrow$ `active` $\rightarrow$ `sync_window`) before checking media upload permissions.
+   - Fixed [`backend/app/party/routes.py`](backend/app/party/routes.py) so `pin_spatial_media` evaluates the party's dynamic time-based state (`planning` $\rightarrow$ `active` $\rightarrow$ `sync_window`) before checking media upload permissions.
 3. **Automated Pytest Configuration & API Integration Tests**:
-   - Added [`backend/pytest.ini`](file:///home/sumeet/git/Trekk/backend/pytest.ini) with `pythonpath = .` and `asyncio_default_fixture_loop_scope = function`.
-   - Added [`backend/tests/test_api_endpoints.py`](file:///home/sumeet/git/Trekk/backend/tests/test_api_endpoints.py) with 5 integration tests covering `/health`, `/elevation/snap`, `/party`, `/party/{id}/members`, `/party/{id}/media/pin`, `/geo/analyze-soi-sheet`, and `/tracks/import`.
+   - Added [`backend/pytest.ini`](backend/pytest.ini) with `pythonpath = .` and `asyncio_default_fixture_loop_scope = function`.
+   - Added [`backend/tests/test_api_endpoints.py`](backend/tests/test_api_endpoints.py) with 5 integration tests covering `/health`, `/elevation/snap`, `/party`, `/party/{id}/members`, `/party/{id}/media/pin`, `/geo/analyze-soi-sheet`, and `/tracks/import`.
    - **All 11 backend tests pass 100%**.
 
-### 2.2 Mobile Live Trail Recording Overhaul ([`mobile/app/(tabs)/record.tsx`](file:///home/sumeet/git/Trekk/mobile/app/(tabs)/record.tsx))
+### 2.2 Mobile Live Trail Recording Overhaul ([`mobile/app/(tabs)/record.tsx`](mobile/app/(tabs)/record.tsx))
 1. **Real Hardware GPS Subscriptions**:
    - Replaced fake increment timers with real `Location.watchPositionAsync` (`BestForNavigation` accuracy, 1.5m distance interval).
    - Real-time calculation of distance using the Haversine formula and cumulative elevation gain filtering.
@@ -70,7 +70,7 @@ This document serves as both the **initial baseline architectural audit** and th
 5. **Tactile Emergency SOS Broadcast**:
    - Encodes a 31-byte distress packet via `MeshService` with current coordinates and automatically queues a priority message on the local squad feed.
 
-### 2.3 Cartographic Enhancements & Base Layer Switcher ([`mobile/components/TopoMapView.tsx`](file:///home/sumeet/git/Trekk/mobile/components/TopoMapView.tsx) & [`mobile/app/(tabs)/index.tsx`](file:///home/sumeet/git/Trekk/mobile/app/(tabs)/index.tsx))
+### 2.3 Cartographic Enhancements & Base Layer Switcher ([`mobile/components/TopoMapView.tsx`](mobile/components/TopoMapView.tsx) & [`mobile/app/(tabs)/index.tsx`](mobile/app/(tabs)/index.tsx))
 1. **Multi-Source Base Tile Layers**:
    - Added a floating tactile map switcher pill:
      - `TOPO`: OpenTopoMap 20m/100m elevation contours.
@@ -82,14 +82,14 @@ This document serves as both the **initial baseline architectural audit** and th
 3. **Map Spotlight Navigation**:
    - When navigating from the `SAVED` tab or tapping a squad coordinate in `SQUADS`, the map automatically zooms, spotlights the target track, and opens the elevation profile.
 
-### 2.4 Saved Trails & GPX Sharing ([`mobile/app/(tabs)/saved.tsx`](file:///home/sumeet/git/Trekk/mobile/app/(tabs)/saved.tsx))
+### 2.4 Saved Trails & GPX Sharing ([`mobile/app/(tabs)/saved.tsx`](mobile/app/(tabs)/saved.tsx))
 1. **View on Topo Map**: Instant action button navigating directly to the map tab with the selected track highlighted.
 2. **Share / Export GPX 1.1**: One-tap GPX 1.1 export with Garmin heart rate extensions using `expo-sharing` and `expo-file-system/legacy` for sharing with adventure club members over WhatsApp, Strava, or Garmin Connect.
 
-### 2.5 Connected Squads & Mesh Radar ([`mobile/app/(tabs)/squads.tsx`](file:///home/sumeet/git/Trekk/mobile/app/(tabs)/squads.tsx))
+### 2.5 Connected Squads & Mesh Radar ([`mobile/app/(tabs)/squads.tsx`](mobile/app/(tabs)/squads.tsx))
 1. **Interactive Coordinate Badges**: Tapping any GPS coordinate pill (`📍 31.0255°N, 78.1748°E ➔ MAP`) on mesh messages or synced photos immediately focuses that location on the Topo Map.
-2. **Instant Offline Fallback for SOI Analyzer**: Added an `AbortController` timeout (2.5s) on [`mobile/services/SoiAnalysisService.ts`](file:///home/sumeet/git/Trekk/mobile/services/SoiAnalysisService.ts) so client-side synthesis is never blocked by backend availability.
-3. **Web Crypto Standardization**: Upgraded [`mobile/services/meshService.ts`](file:///home/sumeet/git/Trekk/mobile/services/meshService.ts) to utilize standard Web Crypto (`crypto.subtle`) for cross-platform SHA-256 calculation.
+2. **Instant Offline Fallback for SOI Analyzer**: Added an `AbortController` timeout (2.5s) on [`mobile/services/SoiAnalysisService.ts`](mobile/services/SoiAnalysisService.ts) so client-side synthesis is never blocked by backend availability.
+3. **Web Crypto Standardization**: Upgraded [`mobile/services/meshService.ts`](mobile/services/meshService.ts) to utilize standard Web Crypto (`crypto.subtle`) for cross-platform SHA-256 calculation.
 
 ---
 

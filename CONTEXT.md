@@ -1,22 +1,22 @@
 # TrekIndia System Context & Architecture Record 🧭
 
 *Document Version*: `2.0.0-EXPO`  
-*Target Environments*: Mobile (React Native Expo SDK 52+ TypeScript / iOS & Android) & Backend (Python 3.11+ FastAPI / PostGIS / GDAL)  
-*Architectural Objective*: Offline-First Himalayan Navigation & Tactile Instrument Monorepo.
+*Target Environments*: Mobile (React Native 0.81.5 / Expo SDK 54 / TypeScript; iOS, Android, and web) & Backend (Python 3.11+ / FastAPI; optional PostGIS/GDAL integrations)
+*Architectural Objective*: Build toward offline-capable Himalayan navigation and a tactile field-instrument experience; current live-network and demo-data boundaries are documented below.
 
 ---
 
 ## 1. System State & Architectural Decisions (ADR)
 
-### ADR-001: Offline-First Hybrid Topographical Rendering
-- **Decision**: Render interactive topographical contours via Leaflet / OpenTopoMap (`https://tile.opentopomap.org/{z}/{x}/{y}.png`) inside native WebView/Map components, overlaying georeferenced Survey of India (SOI) 1:50,000 raster sheets.
-- **Rationale**: Immediate execution on Android & iOS without native compilation barriers; seamless 60fps gesture response and offline caching.
+### ADR-001: Hybrid Topographical Rendering (Offline Capability Is a Goal)
+- **Decision**: Render the interactive map with Leaflet inside a React Native WebView. Current base layers include OpenTopoMap, Esri Satellite, and OpenStreetMap, with trail and SOI overlays.
+- **Current boundary**: Base map tiles are remote sources; complete offline tile caching is not implemented or guaranteed. Saved tracks are stored locally where SQLite is available.
+- **Rationale**: A WebView-based map runs across Expo targets without a custom native map build. Offline map availability and performance must be validated separately.
 
-### ADR-002: Dual-Tier Physical Mesh Architecture
-- **Decision**: Reject reliance on internet or cellular SMS gateways in backcountry. Implement a 2-Tier mesh:
-  - **Tier 1 (Trail-in-Motion)**: Raw BLE non-connectable advertisements carrying a tightly packed 31-byte binary packet with 4-hop multi-hop flood-fill relay and duty-cycled radio (1.5s active / 8s sleep).
-  - **Tier 2 (Basecamp / Tent Sync)**: Embedded HTTP/WebSocket server run on the party leader's device over local Wi-Fi hotspot, allowing 20-40 MB/s bulk delta sync of media and voice notes.
-- **Rationale**: BLE provides continuous low-energy pinging (~100m range, 0.5% battery/hr), while ad-hoc Wi-Fi enables bulk media transfer without cloud infrastructure.
+### ADR-002: Offline Mesh and Camp Sync (Target Architecture)
+- **Decision**: Avoid relying on cellular service in the backcountry. The target design has BLE telemetry/messaging and local Wi-Fi camp synchronization.
+- **Current implementation**: The mobile app contains a 31-byte BLE packet codec, message/relay simulation UI, and Camp Sync demo flow. The repository does not currently implement native BLE scanning/advertising or a phone-hosted Camp Sync HTTP/WebSocket server. The backend `/camp-sync/diff` endpoint returns a hard-coded demonstration item.
+- **Rationale**: BLE and ad-hoc Wi-Fi are intended for low-connectivity use; real-device transport, throughput, battery use, and range still require implementation and field testing.
 
 ### ADR-003: CartoDEM Snapping & Velocity Clamping
 - **Decision**: GPS elevation from budget phones suffers ±30-60m barometric/ephemeris jitter. Backend CartoDEM snapping ingests ISRO 30m GeoTIFFs, performs 2D bilinear interpolation, and applies a Savitzky-Golay filter (window=11, polyorder=2).
@@ -27,10 +27,10 @@
 - **Aesthetic**: Teenage Engineering physical hardware + Garmin Marq + Vintage Survey of India 1960s Topo Cartography.
 - **Tokens**: Deep Pine (`#171D19`) & Obsidian Basalt (`#0F1210`), SOI Parchment (`#F4EFE6`), Rescue Orange (`#FF5500`), Contour Ochre (`#D99B26`), Glacier Cyan (`#38BDF8`), Moss Neon (`#4ADE80`).
 
-### ADR-005: React Native (Expo SDK 52+) Architecture Migration & Multi-Format Ingestion
-- **Decision**: Migrate `/mobile` to React Native Expo (TypeScript / Expo Router). Use `expo-document-picker` with `type: '*/*'` to eliminate Android's OS-level `Unsupported filter` crash when picking fitness files (`.gpx`, `.tcx`, `.fit`).
+### ADR-005: React Native (Expo SDK 54) Architecture & Multi-Format Ingestion
+- **Decision**: `/mobile` uses React Native 0.81.5, Expo SDK 54, TypeScript, and Expo Router. Use `expo-document-picker` with `type: '*/*'` to avoid Android's OS-level `Unsupported filter` crash when picking fitness files (`.gpx`, `.tcx`, `.fit`).
 - **Rationale**: Android system intent filters reject non-standard MIME types for fitness formats unless queried broadly as `*/*`. Subsequent validation and byte decoding are performed in TypeScript using `fast-xml-parser` and binary FIT decoding.
-- **Strava Flow**: Implements `expo-auth-session` / `expo-web-browser` with an intelligent Interactive OAuth2 Simulator fallback so development and sandbox testing never stall even without client secrets.
+- **Strava Flow**: Uses `expo-auth-session` / `expo-web-browser`; the service also has a simulated sandbox-success path. A real Strava client configuration is required for live OAuth.
 
 ---
 
@@ -140,10 +140,13 @@ CREATE TABLE party_media (
 CREATE INDEX idx_party_media_location ON party_media USING GIST (location);
 ```
 
-### 3.2 Mobile Local Offline Database (expo-sqlite)
-Local SQLite tables managed in `mobile/services/DatabaseService.ts` using `expo-sqlite`:
+### 3.2 Mobile Local Offline Database (`expo-sqlite`)
+Tables initialized by `mobile/services/DatabaseService.ts`:
 - `UserImportedTrails`: `id`, `name`, `sourceFormat`, `importedAt`, `distanceKm`, `elevationGainM`, `maxAltitudeM`, `minAltitudeM`, `averageHeartRate`, `pointsJson`, `isSynced`
-- `LocalTracks`: Mirrored in `expo-sqlite` and in-memory fallback for offline recording.
+- `SquadMessages`: message identity, sender, type, time, optional coordinates, hops, and RSSI.
+- `SquadSharedMedia`: media identity, type, SHA-256, sender, time, coordinates, local URI, and sync flag.
+
+If SQLite cannot open (for example, web), the service uses in-memory stores, which are not durable across reloads. Imported-track insert failures propagate so an unsaved recording can be retried. Squad message/media write errors are logged and fall back to memory.
 - Credentials & Tokens: Persisted via `expo-secure-store` (`strava_access_token`, `strava_athlete_name`, `strava_client_id`, `strava_client_secret`).
 - File & Asset I/O: Managed via `expo-file-system/legacy` with string-literal encodings (`utf8`, `base64`).
 
@@ -177,20 +180,10 @@ Local SQLite tables managed in `mobile/services/DatabaseService.ts` using `expo-
 }
 ```
 
-### 4.2 Automated SOI PDF Georeferencing
+### 4.2 SOI Sheet Georeferencing
 - **Route**: `POST /api/v1/geo/soi/georeference`
-- **Request**: `multipart/form-data` with `sheet_pdf` file, `sheet_number` (e.g. `53J/3`), `corner_coords` (4 lat/lon tuples for top-left, top-right, bottom-right, bottom-left).
-- **Response**:
-```json
-{
-  "sheet_number": "53J/3",
-  "mbtiles_url": "/tiles/soi_53J_3.mbtiles",
-  "bounds": [78.25, 30.25, 78.50, 30.50],
-  "min_zoom": 11,
-  "max_zoom": 15,
-  "status": "ready"
-}
-```
+- **Request**: `multipart/form-data` fields `sheet_number`, `tl_lat`, `tl_lon`, `tr_lat`, `tr_lon`, `br_lat`, `br_lon`, `bl_lat`, `bl_lon`, optional `min_zoom`/`max_zoom`, and required file field `sheet_file`.
+- **Response**: `SoiGeoreferenceResponse` (`sheet_number`, `mbtiles_url`, `bounds_bbox`, `min_zoom`, `max_zoom`, `status`, `message`). Actual output depends on the georeferencing pipeline and available GDAL/data assets.
 
 ### 4.3 OSM Himalayan Overpass Harvester
 - **Route**: `POST /api/v1/geo/harvest-osm`
@@ -201,26 +194,12 @@ Local SQLite tables managed in `mobile/services/DatabaseService.ts` using `expo-
   "categories": ["hiking_routes", "springs", "drinking_water", "campsites", "peaks", "passes"]
 }
 ```
-- **Response**: GeoJSON FeatureCollection of harvested topographic objects ingested into PostGIS.
+- **Response**: `OsmHarvestResponse` containing `status`, `total_harvested`, and `features`. The route returns harvested feature data; do not assume it is automatically persisted to PostGIS.
 
-### 4.4 Camp Sync Delta Query
-- **Route**: `POST http://192.168.43.1:8080/api/v1/camp-sync/diff`
-- **Request Body**:
-```json
-{
-  "client_id": "phone_usr_9981",
-  "have_hashes": ["e3b0c44298fc1c149afbf4c8996fb924...", "a591a6d40bf420404a011733cfb7b190..."]
-}
-```
-- **Response**:
-```json
-{
-  "missing_from_client": [
-    {"hash": "f47ac10b...", "size_bytes": 4829104, "filename": "IMG_20261109_Kedarkantha.jpg", "type": "image/jpeg", "captured_at": "2026-11-09T14:32:00Z", "lat": 31.023, "lon": 78.172, "ele": 3810.0}
-  ],
-  "missing_from_server": ["..."]
-}
-```
+### 4.4 Camp Sync Delta Query (Demonstration Endpoint)
+- **Route**: `POST /api/v1/camp-sync/diff` on the FastAPI backend; this is not a device-hosted hotspot server.
+- **Request**: `CampSyncDiffRequest`, including `have_hashes`.
+- **Response**: `missing_from_client` and `missing_from_server`. The current endpoint compares against a hard-coded sample media item; it does not provide actual file transfer or durable server-side sync.
 
 ---
 
@@ -232,26 +211,57 @@ Local SQLite tables managed in `mobile/services/DatabaseService.ts` using `expo-
 - [x] Step 2: Backend setup: `requirements.txt`, Pydantic v2 schemas, async SQLAlchemy & PostGIS models.
 - [x] Step 3: Backend CartoDEM snapping engine, Savitzky-Golay smoothing, velocity clamping.
 - [x] Step 4: Backend automated SOI PDF georeferencing pipeline (GDAL GCPs + Warp + MBTiles).
-- [x] Step 5: Backend OSM Overpass Harvester & PostGIS trail loader.
-- [x] Step 6: Backend Trek Party state machine, EXIF spatial pin, TUS storage, expedition poster generator.
+- [x] Step 5: Backend OSM Overpass Harvester endpoint. Automatic PostGIS ingestion is not established by the current route.
+- [x] Step 6: Backend Trek Party state machine, EXIF spatial pinning, TUS storage module, and expedition poster generator. Party/member/media route state currently uses in-memory dictionaries.
 - [x] Step 7: Tactile Field-Instrument design tokens (`mobile/constants/FieldTokens.ts`).
 - [x] Step 8: Full UI/UX Consumer Overhaul in React Native Expo SDK 54 (Explore, Record, Squads, Saved & Sync).
 - [x] Step 9: 10 Seeded Iconic Indian Treks Dataset with verified dense WGS-84 coordinates (Kedarkantha, Hampta, Dzukou, Sandakphu, Valley of Flowers, Kashmir Great Lakes, Rajmachi, Kalsubai, Kumara Parvatha, David Scott).
 - [x] Step 10: Real Topographical Maps with OpenTopoMap contours, Esri Satellite, OpenStreetMap, and SOI overlay via Leaflet WebView.
-- [x] Step 11: Slide-to-Trigger Emergency SOS Control with 4-hop physical BLE Mesh.
-- [x] Step 12: Offline Camp Sync P2P server state machine + QR badge share.
+- [x] Step 11: Slide-to-trigger SOS UI and BLE packet-format support. Real BLE transmission is not implemented; SOS now requires a fresh GPS fix and does not fabricate coordinates.
+- [x] Step 12: Camp Sync demonstration UI and backend diff endpoint. The backend response is sample data; no peer-hosted sync server or file-transfer implementation is present.
 - [x] Feature Update 1: Native on-map trail plotting with interactive markers, glowing selected state, camera bounds animation, and minimal dismissible inspection pill (bottom cards completely removed).
-- [x] Feature Update 2: Multi-format track parser (.GPX 1.1 with Garmin HR extension, .TCX with HeartRateBpm, binary .FIT with semicircles conversion) with `expo-document-picker` (`type: '*/*'`), `expo-file-system/legacy` literal encodings, and local SQLite persistence via `expo-sqlite`.
+- [x] Feature Update 2: Multi-format track parser (GPX, TCX, FIT semicircle coordinates), document picker (`type: '*/*'`), `expo-file-system/legacy`, and SQLite track persistence. GPX track names take precedence over route names when a track exists; exported GPX text is XML-escaped.
 - [x] Feature Update 3: Strava Integration with official OAuth2 `localhost` callback domain, `expo-secure-store` credentials persistence, athlete activities auditor, "Missing Map" detection & CartoDEM repair action with GPX 1.1 sharing via `expo-sharing`.
 - [x] Feature Update 4: P2P Mesh Messaging & Camp Sync File Sharing:
-  - 31-byte binary BLE advertisement packet encoder/decoder (`[2B Len][4B ServiceUUID][4B PartyHash][4B MsgID][1B MsgType_TTL][16B Payload]`) with 500-entry LRU deduplication, multi-hop TTL decrementing (4 hops max), and text chunker.
+  - 31-byte BLE packet encoder/decoder and codec tests (`[2B Len][4B ServiceUUID][4B PartyHash][4B MsgID][1B MsgType_TTL][16B Payload]`), including TTL and text-chunk handling. This is protocol logic, not native radio transport.
   - Interactive dual-mode offline hub in `app/(tabs)/squads.tsx` (`Mesh Chat`, `Camp File Sync`, `Radar & Nodes`).
   - Tactile quick-broadcast pills (`📍 GPS Pin`, `💧 Water Spring`, `⛺ Camp Pitching`, `🚨 SOS Priority Broadcast`).
-  - Media queuing on BLE mesh (`0x04 Media Notice`) + High-speed Wi-Fi Camp Sync with SHA-256 delta handshakes, chunk progress animations, and automatic map pin plotting.
+  - Media-notice packet support (`0x04`) and Camp Sync UI with SHA-256/hash and transfer-progress presentation. This currently demonstrates the workflow; it does not perform BLE media transmission or actual Wi-Fi file transfer.
   - Simulation engine: `Simulate Incoming Squad Relay (2 Hops)` for multi-hop packet testing on single devices.
 - [x] Feature Update 5: Survey of India (SOI) Map Upload, Georeferenced Image Overlay, & Live Topo Extraction Engine:
   - `expo-document-picker` (`*/*`) and `expo-file-system/legacy` upload flow supporting `.png`, `.jpg`, `.tif`, and `.pdf` SOI sheets.
   - Sheet Graticule Selector (`53J/1 - Sankri/Kedarkantha`, `52H/8 - Hampta/Kullu`, `78O/11 - Mawphlang`, `83K/2 - Dzukou`) with true $15' \times 15'$ bounding boxes.
   - 1-Tap Load Sample SOI Toposheet synthesizing authentic 1:50,000 vintage SVG raster sheet (20m brown contours `#8B5A2B`, red dashed footpaths `#DC2626`, blue perennial streams `#0284C7`, spot heights, triangulation markers).
   - True georeferenced raster image overlay on Leaflet via `L.imageOverlay` with extracted candidate ridgeline/valley trails (`#A855F7`), perennial water springs (`#38BDF8`), flat campsites (`#FACC15`), and triangulated spot heights (`#FF5500`).
-  - Floating SOI Sheet Inspector Bar with live opacity stepper & preset pills (25%, 50%, 75%, 100%), feature counts, and `Save Route to My Trails` action adding candidates into local SQLite storage.
+  - Floating SOI Sheet Inspector Bar with opacity controls, feature counts, and `Save Route to My Trails` action adding candidate routes into local SQLite storage.
+
+## 6. Current App Behavior, Recent Fixes, and Implementation Boundaries
+
+### Mobile screens
+- **Explore** (`mobile/app/(tabs)/index.tsx`): Leaflet map in a WebView; seeded trails, trail selection/inspection, multiple base layers, and SOI overlays. Region navigation is deferred until the WebView map is ready. Selected-trail camera navigation takes precedence over regional fitting; base-layer and trail state are restored on readiness.
+- **Record** (`mobile/app/(tabs)/record.tsx`): Requires location permission and a fresh GPS fix before recording. Trackpoints come from the device location watcher; the app does not synthesize route points, distance, or elevation gain. Failed SQLite track saves remain available for retry. SOS also requires a fresh GPS fix and will not send fabricated coordinates. Heart-rate telemetry is currently simulated; do not treat it as sensor data.
+- **Squads** (`mobile/app/(tabs)/squads.tsx`): Mesh chat, radar, SOS and Camp Sync demonstration UI. BLE packet codec behavior is testable, but native BLE transport is not implemented. Camp Sync is not a working peer-to-peer file transfer.
+- **Saved** (`mobile/app/(tabs)/saved.tsx`): Imported/recorded tracks, Strava activity handling, and GPX export. GPX track names and timestamps are XML-escaped on export.
+
+### Recent verified fixes
+- GPX parsing uses the route name only when no track exists.
+- GPX export escapes XML special characters in names and timestamps.
+- Map region navigation waits for WebView readiness; selected tracks retain camera priority, and regional fit resumes when no track is selected.
+- Recording no longer invents track points or fallback distance/elevation metrics. A failed local track insert is surfaced rather than reported as a successful save; users can retry.
+- SOS requires current location data; missing coordinates are not replaced with a plausible-looking position.
+- SQLite track insert errors propagate to the caller. If SQLite itself cannot open, in-memory storage remains a non-durable fallback.
+- Backend media pinning preserves valid `0.0` latitude/longitude rather than replacing them with defaults.
+- README declares the mobile Node.js minimum as 20.19.4+, and analysis report links are repository-relative.
+
+### Backend and demo-data boundaries
+- FastAPI registers geospatial, party/media, and Strava routers under the configured API prefix. It exposes `/health` and OpenAPI docs at `/docs`.
+- Party/member/media state in `backend/app/party/routes.py` is held in process-memory dictionaries; it is not durable database-backed storage.
+- `/api/v1/camp-sync/diff` compares client hashes against a hard-coded sample media item. No local hotspot server or transfer endpoints are implemented.
+- `/api/v1/geo/analyze-soi-sheet` returns seeded candidate trails; its response is not evidence of computer-vision extraction from the uploaded sheet.
+- Some UI telemetry and Strava sandbox flows are demonstrations. Distinguish implemented parsers/algorithms and API contracts from live hardware, cloud, or production integrations.
+
+### Latest verification after the fixes
+- `bun test`: 8 passed.
+- `mobile/node_modules/.bin/tsc --noEmit --project mobile/tsconfig.json`: passed.
+- `cd backend && uv run --python 3.11 --with-requirements requirements.txt pytest -q`: 11 passed.
+- `git diff --check`: passed.

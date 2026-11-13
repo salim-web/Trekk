@@ -56,7 +56,7 @@ export class TrackParserService {
 
     if (gpx.trk?.name) {
       trackName = String(gpx.trk.name);
-    } else if (gpx.rte?.name) {
+    } else if (!gpx.trk && gpx.rte?.name) {
       trackName = String(gpx.rte.name);
     } else if (gpx.metadata?.name) {
       trackName = String(gpx.metadata.name);

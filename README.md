@@ -162,7 +162,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 Interactive OpenAPI documentation is live at: `http://localhost:8000/docs`.
 
 ### 4.2 Mobile Client Setup (React Native Expo SDK 54)
-Requirements: Node.js 18+ and `bun` or `npm`.
+Requirements: Node.js 20.19.4+ and `bun` or `npm`.
 
 ```bash
 cd mobile

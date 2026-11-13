@@ -54,11 +54,13 @@ export default function RecordScreen() {
   const router = useRouter();
   const [isRecording, setIsRecording] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [distanceMeters, setDistanceMeters] = useState(0);
   const [elevationGain, setElevationGain] = useState(0);
   const [heartRate, setHeartRate] = useState(132);
-  const [altitude, setAltitude] = useState(3812);
+  const [altitude, setAltitude] = useState(0);
   const [pressureHpa, setPressureHpa] = useState(648.5);
   const [currentSpeedKmh, setCurrentSpeedKmh] = useState(0.0);
   const [compassHeading, setCompassHeading] = useState(34);
@@ -70,6 +72,9 @@ export default function RecordScreen() {
   const locationSubRef = useRef<Location.LocationSubscription | null>(null);
   const headingSubRef = useRef<Location.LocationSubscription | null>(null);
   const startTimeRef = useRef<string>(new Date().toISOString());
+  const isRecordingRef = useRef(false);
+  const isPausedRef = useRef(false);
+  const isSavingRef = useRef(false);
 
   // Check & request location permission
   useEffect(() => {
@@ -115,35 +120,6 @@ export default function RecordScreen() {
         // Simulated biometrics natural variation
         setHeartRate((hr) => Math.round(128 + Math.sin(Date.now() / 12000) * 14));
 
-        // If no hardware GPS available (e.g. simulator/denied), advance simulated coordinates along trail
-        if (!locationSubRef.current) {
-          const lastPt = pointsRef.current[pointsRef.current.length - 1] || {
-            latitude: 31.0255,
-            longitude: 78.1748,
-            elevation: 3812,
-          };
-          const deltaLat = (Math.random() - 0.3) * 0.00015;
-          const deltaLon = (Math.random() - 0.2) * 0.00015;
-          const deltaAlt = Math.random() > 0.4 ? 0.35 : -0.05;
-
-          const newLat = lastPt.latitude + deltaLat;
-          const newLon = lastPt.longitude + deltaLon;
-          const newAlt = lastPt.elevation + deltaAlt;
-          const distInc = haversineDistanceMeters(lastPt.latitude, lastPt.longitude, newLat, newLon);
-
-          setDistanceMeters((d) => d + distInc);
-          if (deltaAlt > 0) setElevationGain((g) => g + deltaAlt);
-          setAltitude(newAlt);
-          setCurrentSpeedKmh(3.4 + Math.sin(Date.now() / 8000) * 0.8);
-
-          pointsRef.current.push({
-            latitude: newLat,
-            longitude: newLon,
-            elevation: Math.round(newAlt * 10) / 10,
-            timestamp: new Date().toISOString(),
-            heartRate: Math.round(128 + Math.sin(Date.now() / 12000) * 14),
-          });
-        }
       }, 1000);
     }
     return () => clearInterval(interval);
@@ -160,19 +136,19 @@ export default function RecordScreen() {
             distanceInterval: 1.5,
           },
           (loc) => {
-            if (!isRecording || isPaused) return;
+            if (!isRecordingRef.current || isPausedRef.current) return;
 
             const { latitude, longitude, altitude: locAlt, speed, accuracy } = loc.coords;
             if (accuracy != null) setGpsAccuracy(Math.round(accuracy));
+            const lastPt = pointsRef.current[pointsRef.current.length - 1];
 
-            const ele = locAlt != null ? locAlt : altitude;
+            const ele = locAlt ?? lastPt?.elevation ?? 0;
             setAltitude(ele);
 
             if (speed != null && speed >= 0) {
               setCurrentSpeedKmh(Math.round(speed * 3.6 * 10) / 10);
             }
 
-            const lastPt = pointsRef.current[pointsRef.current.length - 1];
             if (lastPt) {
               const dMeters = haversineDistanceMeters(lastPt.latitude, lastPt.longitude, latitude, longitude);
               if (dMeters > 0.5) {
@@ -197,40 +173,79 @@ export default function RecordScreen() {
       }
     } catch (err) {
       console.warn('Could not start GPS watch:', err);
+      throw err;
     }
   };
 
   const handleStartRecording = async () => {
+    if (hasLocationPermission !== true || isSavingRef.current || saveFailed) {
+      Alert.alert('GPS Unavailable', 'Grant location access and obtain a GPS fix before recording.');
+      return;
+    }
+    let initialFix: Location.LocationObject;
+    try {
+      initialFix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.BestForNavigation });
+      if (!Number.isFinite(initialFix.coords.latitude) || !Number.isFinite(initialFix.coords.longitude)) throw new Error('Invalid GPS fix');
+    } catch {
+      Alert.alert('GPS Unavailable', 'No GPS fix is available. Move to an area with satellite reception and retry.');
+      return;
+    }
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     } catch {}
 
-    startTimeRef.current = new Date().toISOString();
-    pointsRef.current = [];
+    startTimeRef.current = new Date(initialFix.timestamp).toISOString();
+    pointsRef.current = [{
+      latitude: initialFix.coords.latitude,
+      longitude: initialFix.coords.longitude,
+      elevation: initialFix.coords.altitude ?? 0,
+      timestamp: startTimeRef.current,
+      heartRate,
+    }];
+    if (initialFix.coords.altitude != null) setAltitude(initialFix.coords.altitude);
     setDistanceMeters(0);
     setElevationGain(0);
     setElapsedSeconds(0);
+    isRecordingRef.current = true;
+    isPausedRef.current = false;
     setIsRecording(true);
     setIsPaused(false);
 
-    await startGpsWatch();
+    try {
+      await startGpsWatch();
+    } catch {
+      isRecordingRef.current = false;
+      setIsRecording(false);
+      Alert.alert('GPS Unavailable', 'Could not start GPS recording. Check location services and retry.');
+    }
   };
 
   const handlePauseRecording = () => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     } catch {}
-    setIsPaused(!isPaused);
+    isPausedRef.current = !isPausedRef.current;
+    setIsPaused(isPausedRef.current);
   };
 
   const handleStopRecording = async () => {
+    if (isSavingRef.current) return;
+    isSavingRef.current = true;
+    setIsSaving(true);
+    setSaveFailed(false);
+    isRecordingRef.current = false;
+    isPausedRef.current = false;
+    setIsRecording(false);
+    setIsPaused(false);
     try {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch {}
 
     // Cleanup GPS subscription
-    locationSubRef.current?.remove();
-    locationSubRef.current = null;
+    if (!saveFailed) {
+      locationSubRef.current?.remove();
+      locationSubRef.current = null;
+    }
 
     const totalPts = pointsRef.current.length;
     const finalDistKm = Math.round((distanceMeters / 1000) * 100) / 100;
@@ -240,6 +255,8 @@ export default function RecordScreen() {
       Alert.alert('Recording Cancelled', 'Track was too short to be saved (minimum 2 points required).');
       setIsRecording(false);
       setIsPaused(false);
+      isSavingRef.current = false;
+      setIsSaving(false);
       return;
     }
 
@@ -257,8 +274,8 @@ export default function RecordScreen() {
       name: `Expedition Trail (${dateStamp})`,
       sourceFormat: 'gpx',
       points: [...pointsRef.current],
-      distanceKm: finalDistKm > 0.05 ? finalDistKm : 1.25,
-      elevationGainM: finalGain > 5 ? finalGain : 65,
+      distanceKm: finalDistKm,
+      elevationGainM: finalGain,
       maxAltitudeM: Math.round(maxAlt),
       minAltitudeM: Math.round(minAlt),
       averageHeartRate: heartRate,
@@ -266,11 +283,20 @@ export default function RecordScreen() {
       endTime: new Date().toISOString(),
     };
 
-    // Save track directly to SQLite
-    const saved = await DatabaseService.saveImportedTrack(newTrack);
+    // Save track directly to SQLite; keep pointsRef intact if persistence fails for retry.
+    try {
+      await DatabaseService.saveImportedTrack(newTrack);
+    } catch (error) {
+      isSavingRef.current = false;
+      setIsSaving(false);
+      setSaveFailed(true);
+      Alert.alert('Save Failed', 'The recording is retained. Tap RETRY SAVE to try again.');
+      return;
+    }
 
-    setIsRecording(false);
-    setIsPaused(false);
+    isSavingRef.current = false;
+    setIsSaving(false);
+    setSaveFailed(false);
 
     Alert.alert(
       '✅ Track Saved & Verified',
@@ -291,11 +317,26 @@ export default function RecordScreen() {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     } catch {}
 
-    const lastPt = pointsRef.current[pointsRef.current.length - 1] || {
-      latitude: 31.0255,
-      longitude: 78.1748,
-      elevation: altitude,
-    };
+    let lastPt: ParsedTrackpoint | undefined;
+    try {
+      const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.BestForNavigation });
+      if (Number.isFinite(fix.coords.latitude) && Number.isFinite(fix.coords.longitude)) {
+        lastPt = {
+          latitude: fix.coords.latitude,
+          longitude: fix.coords.longitude,
+          elevation: fix.coords.altitude ?? 0,
+          timestamp: new Date(fix.timestamp).toISOString(),
+        };
+      }
+    } catch {}
+    const recordedFix = pointsRef.current[pointsRef.current.length - 1];
+    if (!lastPt && recordedFix && Date.now() - Date.parse(recordedFix.timestamp ?? '') <= 15_000 && Date.now() >= Date.parse(recordedFix.timestamp ?? '')) {
+      lastPt = recordedFix;
+    }
+    if (!lastPt || !Number.isFinite(lastPt.latitude) || !Number.isFinite(lastPt.longitude)) {
+      Alert.alert('No Current GPS Fix', 'SOS was not broadcast because no fresh location is available.');
+      return;
+    }
 
     // Broadcast tactical SOS packet through MeshService
     const sosPacket = MeshService.encodeTacticalAlertPacket(
@@ -497,7 +538,7 @@ export default function RecordScreen() {
 
         {/* Main Recording Controls */}
         <View style={styles.controlsRow}>
-          {!isRecording ? (
+          {!isRecording && !isSaving && !saveFailed ? (
             <KnurledButton
               label="START RECORDING"
               variant="primary"
@@ -514,10 +555,12 @@ export default function RecordScreen() {
                 size="lg"
                 icon={isPaused ? <Play size={18} color="#0F1210" /> : <Pause size={18} color="#0F1210" />}
                 onPress={handlePauseRecording}
+                disabled={isSaving || saveFailed}
                 style={{ flex: 1 }}
               />
               <KnurledButton
-                label="STOP & SAVE"
+                label={isSaving ? 'SAVING…' : saveFailed ? 'RETRY SAVE' : 'STOP & SAVE'}
+                disabled={isSaving}
                 variant="danger"
                 size="lg"
                 icon={<Square size={18} color="#FFFFFF" />}

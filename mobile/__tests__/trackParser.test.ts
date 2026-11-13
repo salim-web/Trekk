@@ -46,6 +46,11 @@ describe('TrackParserService', () => {
     expect(track.elevationGainM).toBeGreaterThan(20);
   });
 
+  it('uses the GPX route name only when no track exists', () => {
+    const gpx = `<gpx><trk><trkseg><trkpt lat="1" lon="2" /></trkseg></trk><rte><name>Other route</name></rte></gpx>`;
+    expect(TrackParserService.parseTrack('fallback.gpx', gpx).name).toBe('fallback');
+  });
+
   it('correctly parses TCX with HeartRateBpm', () => {
     const tcxSample = `<?xml version="1.0" encoding="UTF-8"?>
     <TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2">
